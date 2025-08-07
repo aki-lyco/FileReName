@@ -1,0 +1,142 @@
+﻿<UserControl x:Class="Explore.FilesControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:Explore.FilesSystem"
+             mc:Ignorable="d" 
+             d:DesignHeight="450" d:DesignWidth="800">
+    <Grid>
+        <Grid Margin="5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="4*"/>
+                <ColumnDefinition Width="5"/>
+                <ColumnDefinition Width="3*"/>
+                <ColumnDefinition Width="5"/>
+                <ColumnDefinition Width="3*"/>
+            </Grid.ColumnDefinitions>
+            
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="4*"/>
+                    <RowDefinition Height="5"/>
+                    <RowDefinition Height="3*"/>
+                </Grid.RowDefinitions>
+
+                <local:DockWindowControl x:Name="Selector" Grid.Row="0"
+                                         Icon="&#xF89A;" Title="フォルダーの選択">
+
+                    <local:DockWindowControl.Toolbar>
+                        <ToolBar Style="{StaticResource DockWindowToolBar}">
+                            <Button Style="{StaticResource ToolButton}" Content="&#xE7A7;" />
+                            <Button Style="{StaticResource ToolButton}" Content="&#xE7A6;" />
+                            <Button Style="{StaticResource ToolButton}" Content="&#xE74A;" />
+                            <Button Style="{StaticResource ToolButton}" Content="&#xE895;" />
+                            <Separator/>
+                            
+                        </ToolBar>
+                    </local:DockWindowControl.Toolbar>
+
+                    <local:DockWindowControl.Content>
+                        <ContentControl />
+                    </local:DockWindowControl.Content>
+
+                </local:DockWindowControl>
+
+                <GridSplitter Grid.Row="1" HorizontalAlignment="Stretch"/>
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="5"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <local:DockWindowControl x:Name="Contains" Grid.Column="0" 
+                                             Icon="&#xECC8;" Title="選択フォルダー">
+
+                        <local:DockWindowControl.Toolbar>
+                            <ToolBar Style="{StaticResource DockWindowToolBar}">
+                                <ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xED41;"
+                                              ToolTip="サブフォルダーを含める"/>
+                            </ToolBar>
+                        </local:DockWindowControl.Toolbar>
+                        
+                        <local:DockWindowControl.Content>
+                            <ContentControl />
+                        </local:DockWindowControl.Content>
+
+                    </local:DockWindowControl>
+
+                    <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch"/>
+
+                    <local:DockWindowControl x:Name="Omit" Grid.Column="2"
+                                             Icon="&#xECC9;" Title="除外フォルダー">
+
+                        <local:DockWindowControl.Toolbar>
+                            <ToolBar Style="{StaticResource DockWindowToolBar}">
+                                <ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xED41;"
+                                              ToolTip="サブフォルダーを含める"/>
+                            </ToolBar>
+                        </local:DockWindowControl.Toolbar>
+
+                        <local:DockWindowControl.Content>
+                            <ContentControl />
+                        </local:DockWindowControl.Content>
+
+                    </local:DockWindowControl>
+                </Grid>
+            </Grid>
+            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch"/>
+
+            <local:DockWindowControl x:Name="List" Grid.Column="2"
+                                     Icon="&#xF2C7;" Title="ファイル一覧">
+
+                <local:DockWindowControl.Toolbar>
+                    <ToolBar Style="{StaticResource DockWindowToolBar}">
+                        <Button Style="{StaticResource ToolButton}" Content="&#xE8B3;"
+                                ToolTip="全て選択"/>
+                        <Button Style="{StaticResource ToolButton}" Content="&#xE8CB;"
+                                ToolTip="並べ替え"/>
+                        <ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xE71C;"
+                                      ToolTip="フィルター"/>
+                        <Separator/>
+                        <ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xED1A;"
+                                      ToolTip="選択中のフォルダーの中身を非表示" />
+                        <Separator/>
+                        <ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xF0E2;"
+                                      ToolTip="大きく表示"/>
+                        <ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xF232;"
+                                      ToolTip="小さく表示"/>
+                        <ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xEA37;"
+                                      ToolTip="リスト表示"/>
+                    </ToolBar>
+                </local:DockWindowControl.Toolbar>
+
+                <local:DockWindowControl.Content>
+                    <ContentControl />
+                </local:DockWindowControl.Content>
+
+            </local:DockWindowControl>
+            
+            <GridSplitter Grid.Column="3" HorizontalAlignment="Stretch"/>
+
+            <local:DockWindowControl x:Name="Preview" Grid.Column="4"
+                                     Icon="&#xE8FF;" Title="プレビュー">
+
+                <local:DockWindowControl.Toolbar>
+                    <ToolBar Style="{StaticResource DockWindowToolBar}">
+                        <Button Style="{StaticResource ToolButton}" Content="&#xE895;" />
+                        <Separator/>
+                        <ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xE89A;" />
+                        <Button Style="{StaticResource ToolButton}" Content="&#xE740;" />
+                    </ToolBar>
+                </local:DockWindowControl.Toolbar>
+
+                <local:DockWindowControl.Content>
+                    <ContentControl />
+                </local:DockWindowControl.Content>
+
+            </local:DockWindowControl>
+        </Grid>
+    </Grid>
+</UserControl>
