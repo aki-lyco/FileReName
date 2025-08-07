@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <Folder Include="BuildSystem\" />
+    <Folder Include="Models\" />
   </ItemGroup>
 
   <ItemGroup>
