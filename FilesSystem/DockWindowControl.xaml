@@ -39,7 +39,7 @@
             <ContentControl x:Name="ToolbarHost" DockPanel.Dock="Top"
                             Content="{Binding Toolbar, RelativeSource={RelativeSource AncestorType=UserControl}}" />
 
-            <ContentPresenter />
+			<ContentPresenter Content="{Binding Content, RelativeSource={RelativeSource AncestorType=UserControl}}" />
         </DockPanel>
     </Border>
 </UserControl>
