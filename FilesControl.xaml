@@ -17,6 +17,7 @@
 				<ColumnDefinition Width="3*"/>
 			</Grid.ColumnDefinitions>
 
+			<!-- 左ペイン -->
 			<Grid Grid.Column="0">
 				<Grid.RowDefinitions>
 					<RowDefinition Height="4*"/>
@@ -24,10 +25,9 @@
 					<RowDefinition Height="3*"/>
 				</Grid.RowDefinitions>
 
-				<!-- 左上: フォルダーの選択（フォルダツリーを配置） -->
+				<!-- 左上: フォルダーの選択（ツリー） -->
 				<local:DockWindowControl x:Name="Selector" Grid.Row="0"
                                          Icon="&#xF89A;" Title="フォルダーの選択">
-
 					<local:DockWindowControl.Toolbar>
 						<ToolBar Style="{StaticResource DockWindowToolBar}">
 							<Button Style="{StaticResource ToolButton}" Content="&#xE7A7;" />
@@ -39,7 +39,7 @@
 					</local:DockWindowControl.Toolbar>
 
 					<local:DockWindowControl.Content>
-						<!-- ※ NameScope の衝突を避けるため x:Name は付けない -->
+						<!-- ※ NameScope 衝突回避のため x:Name は付けない -->
 						<TreeView ItemsSource="{Binding Roots}"
                                   SelectedItemChanged="OnFolderSelected">
 							<TreeView.ItemContainerStyle>
@@ -55,12 +55,11 @@
 							</TreeView.Resources>
 						</TreeView>
 					</local:DockWindowControl.Content>
-
 				</local:DockWindowControl>
 
 				<GridSplitter Grid.Row="1" HorizontalAlignment="Stretch"/>
 
-				<!-- 左下: 選択フォルダー（そのまま） -->
+				<!-- 左下: プレースホルダ（そのまま） -->
 				<Grid Grid.Row="2">
 					<Grid.ColumnDefinitions>
 						<ColumnDefinition Width="*"/>
@@ -70,46 +69,39 @@
 
 					<local:DockWindowControl x:Name="Contains" Grid.Column="0"
                                              Icon="&#xECC8;" Title="選択フォルダー">
-
 						<local:DockWindowControl.Toolbar>
 							<ToolBar Style="{StaticResource DockWindowToolBar}">
 								<ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xED41;"
                                               ToolTip="サブフォルダーを含める"/>
 							</ToolBar>
 						</local:DockWindowControl.Toolbar>
-
 						<local:DockWindowControl.Content>
 							<ContentControl />
 						</local:DockWindowControl.Content>
-
 					</local:DockWindowControl>
 
 					<GridSplitter Grid.Column="1" HorizontalAlignment="Stretch"/>
 
 					<local:DockWindowControl x:Name="Omit" Grid.Column="2"
                                              Icon="&#xECC9;" Title="除外フォルダー">
-
 						<local:DockWindowControl.Toolbar>
 							<ToolBar Style="{StaticResource DockWindowToolBar}">
 								<ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xED41;"
                                               ToolTip="サブフォルダーを含める"/>
 							</ToolBar>
 						</local:DockWindowControl.Toolbar>
-
 						<local:DockWindowControl.Content>
 							<ContentControl />
 						</local:DockWindowControl.Content>
-
 					</local:DockWindowControl>
 				</Grid>
 			</Grid>
 
 			<GridSplitter Grid.Column="1" HorizontalAlignment="Stretch"/>
 
-			<!-- 中央: ファイル一覧（ListView を配置） -->
+			<!-- 中央: ファイル一覧 -->
 			<local:DockWindowControl x:Name="List" Grid.Column="2"
                                      Icon="&#xF2C7;" Title="ファイル一覧">
-
 				<local:DockWindowControl.Toolbar>
 					<ToolBar Style="{StaticResource DockWindowToolBar}">
 						<Button Style="{StaticResource ToolButton}" Content="&#xE8B3;"
@@ -128,11 +120,42 @@
                                       ToolTip="小さく表示"/>
 						<ToggleButton Style="{StaticResource ToggleToolButton}" Content="&#xEA37;"
                                       ToolTip="リスト表示"/>
+
+						<!-- ★ 追加: 自動でDBへ投入（フォルダ選択時に実行） -->
+						<Separator/>
+						<ToggleButton
+                            Style="{StaticResource ToggleToolButton}"
+                            Content="&#xE73A;"
+                            ToolTip="フォルダー選択時に自動でDB更新"
+                            Checked="AutoIndex_Checked"
+                            Unchecked="AutoIndex_Unchecked"/>
+
+						<!-- サブフォルダー含める（x:Nameは付けない） -->
+						<ToggleButton
+                            Style="{StaticResource ToggleToolButton}"
+                            Content="&#xED41;"
+                            ToolTip="サブフォルダーを含める"
+                            Checked="IncludeSubs_Checked"
+                            Unchecked="IncludeSubs_Unchecked"/>
+
+						<!-- 手動でDB投入＆件数確認 -->
+						<Button Style="{StaticResource ToolButton}"
+                                Content="&#xE73E;"
+                                ToolTip="選択中フォルダーをDBに追加"
+                                Click="OnIndexCurrentFolderClick"/>
+						<Button Style="{StaticResource ToolButton}"
+								Content="&#xE71A;"
+								ToolTip="インデックスを停止"
+								Click="OnCancelIndexClick"/>
+						<Button Style="{StaticResource ToolButton}"
+                                Content="&#xE9D2;"
+                                ToolTip="DB件数を表示"
+                                Click="OnShowDbCountsClick"/>
 					</ToolBar>
 				</local:DockWindowControl.Toolbar>
 
 				<local:DockWindowControl.Content>
-					<!-- ※ NameScope の衝突を避けるため x:Name は付けない -->
+					<!-- ※ NameScope 衝突回避のため x:Name は付けない -->
 					<ListView ItemsSource="{Binding Files}">
 						<ListView.View>
 							<GridView>
@@ -144,15 +167,13 @@
 						</ListView.View>
 					</ListView>
 				</local:DockWindowControl.Content>
-
 			</local:DockWindowControl>
 
 			<GridSplitter Grid.Column="3" HorizontalAlignment="Stretch"/>
 
-			<!-- 右: プレビュー（そのまま） -->
+			<!-- 右: プレビュー（プレースホルダ） -->
 			<local:DockWindowControl x:Name="Preview" Grid.Column="4"
                                      Icon="&#xE8FF;" Title="プレビュー">
-
 				<local:DockWindowControl.Toolbar>
 					<ToolBar Style="{StaticResource DockWindowToolBar}">
 						<Button Style="{StaticResource ToolButton}" Content="&#xE895;" />
@@ -161,11 +182,9 @@
 						<Button Style="{StaticResource ToolButton}" Content="&#xE740;" />
 					</ToolBar>
 				</local:DockWindowControl.Toolbar>
-
 				<local:DockWindowControl.Content>
 					<ContentControl />
 				</local:DockWindowControl.Content>
-
 			</local:DockWindowControl>
 		</Grid>
 	</Grid>
