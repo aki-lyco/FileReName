@@ -1,10 +1,9 @@
 ﻿// Explore/FilesControl.xaml.cs
-// ExplorerBackend（Explore.FileSystem）に沿って、遅延ロードのツリー＋右側のファイル一覧を表示。
-// DB登録は選択フォルダ（未選択時は既知フォルダ群）を対象に実行。UI応答性重視で IAsyncEnumerable で供給。
+// 左：フォルダツリー / 右：ファイル一覧。DBインデックスは手動時は進捗バーを更新（scanned/total）。
+// 自動インデックス（フォルダ選択時ON）は静かに実行してUIを塞がない。
 
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -14,20 +13,23 @@ using System.Windows;
 using System.Windows.Controls;
 using Explore.FileSystem;
 using Explore.Indexing;
-using Microsoft.Data.Sqlite; // DB件数表示用
-using WpfMessageBox = System.Windows.MessageBox; // ← WPFのMessageBoxを明示
+using Microsoft.Data.Sqlite;
+using Explore.UI;
+using WpfMessageBox = System.Windows.MessageBox;
+using WpfUserControl = System.Windows.Controls.UserControl;
 
 namespace Explore
 {
-    public partial class FilesControl : System.Windows.Controls.UserControl, INotifyPropertyChanged
+    public partial class FilesControl : WpfUserControl, INotifyPropertyChanged
     {
         // ---- VM（ExplorerBackend） ----
-        public ExplorerViewModel Vm { get; } = new ExplorerViewModel(new DefaultFileSystemService());
+        private readonly ExplorerViewModel _vm = new(new DefaultFileSystemService());
+        public ExplorerViewModel VM => _vm;
 
         // ---- DB ----
-        private readonly IndexDatabase _db = new();
+        private static readonly IndexDatabase _db = new();
 
-        // ---- トグル状態 ----
+        // ---- 設定（歯車） ----
         private bool _includeSubs;
         private bool _autoIndex;
 
@@ -37,14 +39,24 @@ namespace Explore
         public FilesControl()
         {
             InitializeComponent();
-            DataContext = this; // この UserControl を DataContext に。XAML は Vm.* にバインド。
 
             Loaded += async (_, __) =>
             {
+                DataContext = this;
+
+                // 設定を反映
+                _autoIndex = UiSettings.Instance.AutoIndexOnSelect;
+                _includeSubs = UiSettings.Instance.IncludeSubfolders;
+                UiSettings.Instance.Changed += (_, __) =>
+                {
+                    _autoIndex = UiSettings.Instance.AutoIndexOnSelect;
+                    _includeSubs = UiSettings.Instance.IncludeSubfolders;
+                };
+
                 try
                 {
                     await _db.EnsureCreatedAsync();
-                    await Vm.LoadRootsAsync(); // ルート（ドライブ等）をロード
+                    await _vm.LoadRootsAsync(); // ルート（ドライブ等）をロード
                     await RefreshDbCountAsync();
                 }
                 catch (Exception ex)
@@ -58,14 +70,21 @@ namespace Explore
         }
 
         // ===== バインディング用プロパティ =====
+        private bool _isIndexing;
+        public bool IsIndexing { get => _isIndexing; private set { _isIndexing = value; OnPropertyChanged(); } }
+
         private double _indexPercent;
-        public double IndexPercent { get => _indexPercent; set { _indexPercent = value; OnPropertyChanged(); } }
+        public double IndexPercent { get => _indexPercent; private set { _indexPercent = value; OnPropertyChanged(); } }
 
-        private string _indexStatusText = "";
-        public string IndexStatusText { get => _indexStatusText; set { _indexStatusText = value; OnPropertyChanged(); } }
+        private string _indexStatusText = "待機中";
+        public string IndexStatusText { get => _indexStatusText; private set { _indexStatusText = value; OnPropertyChanged(); } }
 
-        private string _indexedCountText = "0";
-        public string IndexedCountText { get => _indexedCountText; set { _indexedCountText = value; OnPropertyChanged(); } }
+        private string _indexedCountText = "";
+        public string IndexedCountText { get => _indexedCountText; private set { _indexedCountText = value; OnPropertyChanged(); } }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string? name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
         // ===== ツリー操作 =====
 
@@ -74,7 +93,7 @@ namespace Explore
         {
             if (e.OriginalSource is TreeViewItem tvi && tvi.DataContext is FolderNode node)
             {
-                try { await Vm.EnsureChildrenLoadedAsync(node); }
+                try { await _vm.EnsureChildrenLoadedAsync(node); }
                 catch { /* アクセス拒否などは握りつぶす */ }
             }
         }
@@ -82,118 +101,86 @@ namespace Explore
         // 選択変更：右ペインにファイル一覧を表示（VMが埋める）
         private async void OnFolderSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
         {
-            if (e.NewValue is FolderNode node)
-            {
-                try { await Vm.NavigateToAsync(node.FullPath); }
-                catch { /* 握りつぶし */ }
+            if (e.NewValue is not FolderNode node) return;
 
-                // 自動インデックスがONなら開始
-                if (_autoIndex)
+            try { await _vm.NavigateToAsync(node.FullPath); }
+            catch { /* 握りつぶし */ }
+
+            // 自動インデックスがONなら、静かにDB投入（ゲージは出さない）
+            if (_autoIndex)
+            {
+                _indexCts?.Cancel();
+                _indexCts = new CancellationTokenSource();
+                var ct = _indexCts.Token;
+
+                try
                 {
-                    OnIndexCurrentFolderClick(this, new RoutedEventArgs());
+                    await _db.EnsureCreatedAsync();
+                    var targets = new List<string> { node.FullPath };
+                    var records = EnumerateRecordsAsync(targets, _includeSubs, ct);
+                    await _db.BulkUpsertAsync(records, batchSize: 500, progress: null, ct: ct);
+                    await RefreshDbCountAsync();
+                }
+                catch (OperationCanceledException) { /* noop */ }
+                catch (Exception ex)
+                {
+                    WpfMessageBox.Show(ex.Message, "Auto Index Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    _indexCts?.Dispose();
+                    _indexCts = null;
                 }
             }
         }
 
-        // ===== トグル（XAMLのハンドラに対応） =====
-        private void IncludeSubs_Checked(object sender, RoutedEventArgs e) => _includeSubs = true;
-        private void IncludeSubs_Unchecked(object sender, RoutedEventArgs e) => _includeSubs = false;
-
-        private void AutoIndex_Checked(object sender, RoutedEventArgs e) => _autoIndex = true;
-        private void AutoIndex_Unchecked(object sender, RoutedEventArgs e) => _autoIndex = false;
-
-        // ===== 手動インデックス（選択フォルダ優先、未選択時は既知フォルダ） =====
+        // ===== 手動インデックス（メニュー等から呼ぶ想定。XAMLボタンは削除済み） =====
         private async void OnIndexCurrentFolderClick(object sender, RoutedEventArgs e)
         {
             if (_indexCts != null) return; // 多重起動防止
-
             _indexCts = new CancellationTokenSource();
             var ct = _indexCts.Token;
 
             try
             {
-                IndexStatusText = "収集中...";
-                IndexPercent = 0;
-
                 var targets = GetSelectedFolderPaths();
                 if (targets.Count == 0)
-                    targets = GetDefaultHotRoots(); // 未選択時のフォールバック
+                    targets = GetDefaultHotRoots();
 
-                // ファイル列挙（Hidden/System 除外）
-                async IAsyncEnumerable<DbFileRecord> EnumerateAsync()
+                await _db.EnsureCreatedAsync();
+
+                // ① 総数を事前カウント（別スレッド）
+                IndexStatusText = "ファイル数を集計中…";
+                IndexPercent = 0;
+                var includeSubs = _includeSubs; // ローカルに固定
+                long total = await Task.Run(() => CountFiles(targets, includeSubs, ct), ct);
+
+                // ② 本処理：レコード列挙
+                IsIndexing = true;
+                IndexStatusText = $"登録開始（対象 {total:N0} 件）";
+                IndexPercent = 0;
+
+                var records = EnumerateRecordsAsync(targets, includeSubs, ct);
+
+                // ③ 進捗（scanned / total）
+                var prog = new Progress<(long scanned, long inserted)>(p =>
                 {
-                    await Task.Yield(); // UI ブロック回避
-
-                    var so = _includeSubs ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-                    foreach (var root in targets)
-                    {
-                        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-                            continue;
-
-                        IEnumerable<string> files;
-                        try
-                        {
-                            files = Directory.EnumerateFiles(root, "*", so);
-                        }
-                        catch
-                        {
-                            continue; // アクセス拒否などはスキップ
-                        }
-
-                        foreach (var path in files)
-                        {
-                            ct.ThrowIfCancellationRequested();
-
-                            FileInfo fi;
-                            try
-                            {
-                                fi = new FileInfo(path);
-                                if (!fi.Exists) continue;
-
-                                var attr = fi.Attributes;
-                                if ((attr & FileAttributes.Hidden) != 0) continue;
-                                if ((attr & FileAttributes.System) != 0) continue;
-                            }
-                            catch
-                            {
-                                continue;
-                            }
-
-                            yield return new DbFileRecord
-                            {
-                                Path = fi.FullName,
-                                FileKey = FileKeyUtil.GetStableKey(fi.FullName), // ← 修正
-                                Parent = fi.DirectoryName,
-                                Name = fi.Name,
-                                Ext = fi.Extension,
-                                Size = fi.Length,
-                                MTimeUnix = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeSeconds(),
-                                CTimeUnix = new DateTimeOffset(fi.CreationTimeUtc).ToUnixTimeSeconds(),
-                                Mime = null,
-                                Summary = null,
-                                Snippet = null,
-                                Classified = null
-                            };
-                        }
-                    }
-                }
-
-                var progress = new Progress<(long scanned, long inserted)>(p =>
-                {
-                    IndexStatusText = $"スキャン {p.scanned:N0} / 追加 {p.inserted:N0}";
-                    IndexPercent = p.scanned == 0 ? 0 : Math.Min(100, p.inserted * 100.0 / Math.Max(1, p.scanned));
+                    double percent = (total <= 0) ? 0 : Math.Min(100.0, p.scanned * 100.0 / total);
+                    IndexPercent = percent;
+                    IndexStatusText = $"登録中 {p.scanned:N0} / {total:N0}";
                 });
 
-                var result = await _db.BulkUpsertAsync(EnumerateAsync(), batchSize: 200, progress: progress, ct: ct);
+                var (scanned, inserted) = await _db.BulkUpsertAsync(records, batchSize: 200, progress: prog, ct: ct);
 
-                IndexStatusText = $"完了: スキャン {result.scanned:N0} / 追加 {result.inserted:N0}";
-                IndexPercent = 100;
                 await RefreshDbCountAsync();
 
-                WpfMessageBox.Show(
-                    $"スキャン: {result.scanned:N0} 件\n新規: {result.inserted:N0} 件\nDB: {IndexDatabase.DatabasePath}",
-                    "インデックス完了",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                IndexStatusText = "完了";
+                IndexPercent = 100;
+
+                // 完了ダイアログがうるさければコメントアウトのままでOK
+                // WpfMessageBox.Show(
+                //     $"スキャン: {scanned:N0} 件\n新規: {inserted:N0} 件\nDB: {IndexDatabase.DatabasePath}",
+                //     "Index 完了", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (OperationCanceledException)
             {
@@ -201,44 +188,109 @@ namespace Explore
             }
             catch (Exception ex)
             {
-                WpfMessageBox.Show($"Index 処理でエラー: {ex.Message}",
-                    "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                IndexStatusText = "エラー";
+                WpfMessageBox.Show(ex.Message, "Index Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
+                IsIndexing = false;
                 _indexCts?.Dispose();
                 _indexCts = null;
             }
         }
 
-        // キャンセル
+        // 任意（もし残っていればメニュー等からキャンセル可能）
         private void OnCancelIndexClick(object sender, RoutedEventArgs e)
         {
             _indexCts?.Cancel();
         }
 
-        // DB 件数表示
-        private async void OnShowDbCountsClick(object sender, RoutedEventArgs e)
+        // ===== 列挙（Hidden/System を除外） =====
+        private async IAsyncEnumerable<DbFileRecord> EnumerateRecordsAsync(
+            List<string> targets, bool includeSubs, [EnumeratorCancellation] CancellationToken ct)
         {
-            try
-            {
-                long files = await CountAsync("files");
-                long renms = await CountAsync("rename_suggestions");
-                long moves = await CountAsync("moves");
+            await Task.Yield(); // UI ブロック回避
 
-                WpfMessageBox.Show(
-                    $"files: {files:N0}\nrename_suggestions: {renms:N0}\nmoves: {moves:N0}\n\nDB: {IndexDatabase.DatabasePath}",
-                    "DB 状態",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            catch (Exception ex)
+            var so = includeSubs ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+
+            foreach (var root in targets)
             {
-                WpfMessageBox.Show($"DB情報の取得に失敗: {ex.Message}",
-                    "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+                    continue;
+
+                IEnumerable<string> files;
+                try { files = Directory.EnumerateFiles(root, "*", so); }
+                catch { continue; }
+
+                foreach (var path in files)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    FileInfo fi;
+                    try
+                    {
+                        fi = new FileInfo(path);
+                        if (!fi.Exists) continue;
+
+                        var attr = fi.Attributes;
+                        if ((attr & FileAttributes.Hidden) != 0) continue;
+                        if ((attr & FileAttributes.System) != 0) continue;
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    yield return new DbFileRecord
+                    {
+                        Path = fi.FullName,
+                        FileKey = FileKeyUtil.GetStableKey(fi.FullName),
+                        Parent = fi.DirectoryName,
+                        Name = fi.Name,
+                        Ext = fi.Extension,
+                        Size = fi.Length,
+                        MTimeUnix = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeSeconds(),
+                        CTimeUnix = new DateTimeOffset(fi.CreationTimeUtc).ToUnixTimeSeconds(),
+                        Mime = null,
+                        Summary = null,
+                        Snippet = null,
+                        Classified = null
+                    };
+                }
             }
         }
 
-        // 選択中フォルダのパス取得
+        // ===== 進捗表示用：総数カウント =====
+        private static long CountFiles(List<string> roots, bool includeSubs, CancellationToken ct)
+        {
+            long total = 0;
+            var so = includeSubs ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+
+            foreach (var root in roots)
+            {
+                if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) continue;
+
+                IEnumerable<string> files;
+                try { files = Directory.EnumerateFiles(root, "*", so); }
+                catch { continue; }
+
+                foreach (var path in files)
+                {
+                    if (ct.IsCancellationRequested) return total;
+                    try
+                    {
+                        var attr = File.GetAttributes(path);
+                        if ((attr & FileAttributes.Hidden) != 0) continue;
+                        if ((attr & FileAttributes.System) != 0) continue;
+                        total++;
+                    }
+                    catch { /* ignore */ }
+                }
+            }
+            return total;
+        }
+
+        // ===== ヘルパー =====
         private List<string> GetSelectedFolderPaths()
         {
             var list = new List<string>();
@@ -247,7 +299,6 @@ namespace Explore
             return list;
         }
 
-        // 既定の対象ルート（未選択時用）
         private static List<string> GetDefaultHotRoots()
         {
             var result = new List<string>();
@@ -269,15 +320,15 @@ namespace Explore
         {
             try
             {
-                IndexedCountText = (await CountAsync("files")).ToString("N0");
+                IndexedCountText = $"DB件数: {(await GetTableCountAsync("files")).ToString("N0")}";
             }
             catch
             {
-                IndexedCountText = "0";
+                IndexedCountText = "DB件数: -";
             }
         }
 
-        private static async Task<long> CountAsync(string table)
+        private static async Task<long> GetTableCountAsync(string table)
         {
             await using var conn = new SqliteConnection(
                 new SqliteConnectionStringBuilder { DataSource = IndexDatabase.DatabasePath }.ToString());
@@ -287,9 +338,6 @@ namespace Explore
             return Convert.ToInt64(await cmd.ExecuteScalarAsync() ?? 0);
         }
 
-        // ===== INotifyPropertyChanged =====
-        public event PropertyChangedEventHandler? PropertyChanged;
-        private void OnPropertyChanged([CallerMemberName] string? name = null)
-            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        // ===== INotifyPropertyChanged 実装は上に記載 =====
     }
 }

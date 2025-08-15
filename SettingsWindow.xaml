@@ -1,0 +1,14 @@
+﻿<Window x:Class="Explore.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="設定" Height="180" Width="360" WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <StackPanel Margin="16" VerticalAlignment="Center" >
+        <CheckBox x:Name="AutoIndexBox" Content="フォルダ選択時に自動インデックス" Margin="0,0,0,8"/>
+        <CheckBox x:Name="IncludeSubsBox" Content="サブフォルダを含める（インデックス時）" Margin="0,0,0,16"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Width="90" Margin="0,0,8,0" Click="OnCancel">キャンセル</Button>
+            <Button Width="90" IsDefault="True" Click="OnOK">OK</Button>
+        </StackPanel>
+    </StackPanel>
+</Window>
