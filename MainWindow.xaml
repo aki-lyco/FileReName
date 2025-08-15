@@ -28,7 +28,7 @@
                 <StackPanel Orientation="Horizontal" FlowDirection="RightToLeft"
                             Grid.Row="0">
                     <Button Style="{StaticResource SettingsIconButton}" Content="&#xE713;" FontSize="20"
-                            Margin="5,0,5,0" Width="28" Height="28" />
+                            Margin="5,0,5,0" Width="28" Height="28" Click="OpenSettings"/>
                     
                     <ToggleButton x:Name="ChatToggle" Checked="SwitchToChat"
                                   Margin="5,3,0,3" Width="85" >

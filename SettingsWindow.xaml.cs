@@ -8,7 +8,7 @@ namespace Explore
         public SettingsWindow()
         {
             InitializeComponent();
-            // ‰Šú’l
+            // Œ»İ’l‚ğ”½‰f
             AutoIndexBox.IsChecked = UiSettings.Instance.AutoIndexOnSelect;
             IncludeSubsBox.IsChecked = UiSettings.Instance.IncludeSubfolders;
         }

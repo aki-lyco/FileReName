@@ -1,4 +1,4 @@
-// Explore/UI/UiSettings.cs
+// UI/UiSettings.cs
 using System;
 using System.IO;
 using System.Text.Json;
@@ -7,16 +7,15 @@ namespace Explore.UI
 {
     public sealed class UiSettings
     {
-        public bool AutoIndexOnSelect { get; set; } = false;
-        public bool IncludeSubfolders { get; set; } = false;
+        public bool AutoIndexOnSelect { get; set; } = false;     // フォルダ選択時に自動インデックス
+        public bool IncludeSubfolders { get; set; } = false;     // サブフォルダを含める
 
         public event EventHandler? Changed;
         public void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
 
-        // 永続化
         private static readonly string Dir =
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FileReName");
-        private static readonly string PathJson = System.IO.Path.Combine(Dir, "ui-settings.json");
+        private static readonly string JsonPath = Path.Combine(Dir, "ui-settings.json");
 
         public static UiSettings Instance { get; private set; } = Load();
 
@@ -24,9 +23,9 @@ namespace Explore.UI
         {
             try
             {
-                if (File.Exists(PathJson))
+                if (File.Exists(JsonPath))
                 {
-                    var text = File.ReadAllText(PathJson);
+                    var text = File.ReadAllText(JsonPath);
                     var s = JsonSerializer.Deserialize<UiSettings>(text);
                     if (s != null) return s;
                 }
@@ -41,7 +40,7 @@ namespace Explore.UI
             {
                 Directory.CreateDirectory(Dir);
                 var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(PathJson, json);
+                File.WriteAllText(JsonPath, json);
             }
             catch { /* ignore */ }
         }
