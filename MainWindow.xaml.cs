@@ -1,67 +1,76 @@
-﻿using System.Drawing.Imaging.Effects;
-using System.Text;
+﻿using System;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
 
 namespace Explore
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
     public partial class MainWindow : Window
     {
         private bool ready = false;
-        private FilesControl _filesControl;
-        private ChatControl _chatControl;
-        private BuildControl _buildControl;
+        private readonly FilesControl _filesControl;
+        private readonly ChatControl _chatControl;
+        private readonly BuildControl _buildControl;
+
         public MainWindow()
         {
             InitializeComponent();
-            _filesControl = new FilesControl();
-            _chatControl = new ChatControl();
-            _buildControl = new BuildControl();
-            MainViewBox.Content = _filesControl;
-            ready = true;
+            try
+            {
+                _filesControl = new FilesControl();
+                _chatControl = new ChatControl();
+                _buildControl = new BuildControl();
+
+                // 既定はファイルビュー
+                MainViewBox.Content = _filesControl;
+                if (FileToggle != null)
+                {
+                    FileToggle.IsChecked = true;
+                    FileToggle.IsEnabled = false;
+                }
+                ready = true;
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(ex.ToString(), "MainWindow Error");
+                throw; // デバッガにも伝える
+            }
         }
 
         private void SwitchToFile(object sender, RoutedEventArgs e)
         {
             FileToggle.IsEnabled = false;
-            if (ready)
-            {
-                MainViewBox.Content = _filesControl;
-            }
-            ChatToggle.IsChecked = false;
-            ChatToggle.IsEnabled = true;
-            BuildToggle.IsChecked = false;
-            BuildToggle.IsEnabled = true;
+            if (ready) MainViewBox.Content = _filesControl;
+            if (ChatToggle != null) { ChatToggle.IsChecked = false; ChatToggle.IsEnabled = true; }
+            if (BuildToggle != null) { BuildToggle.IsChecked = false; BuildToggle.IsEnabled = true; }
         }
 
         private void SwitchToChat(object sender, RoutedEventArgs e)
         {
             ChatToggle.IsEnabled = false;
-            MainViewBox.Content = _chatControl;
-            FileToggle.IsChecked = false;
-            FileToggle.IsEnabled = true;
-            BuildToggle.IsChecked = false;
-            BuildToggle.IsEnabled = true;
+            if (ready) MainViewBox.Content = _chatControl;
+            if (FileToggle != null) { FileToggle.IsChecked = false; FileToggle.IsEnabled = true; }
+            if (BuildToggle != null) { BuildToggle.IsChecked = false; BuildToggle.IsEnabled = true; }
         }
 
         private void SwitchToBuild(object sender, RoutedEventArgs e)
         {
             BuildToggle.IsEnabled = false;
-            MainViewBox.Content = _buildControl;
-            FileToggle.IsChecked = false;
-            FileToggle.IsEnabled = true;
-            ChatToggle.IsChecked = false;
-            ChatToggle.IsEnabled = true;
+            if (ready) MainViewBox.Content = _buildControl;
+            if (FileToggle != null) { FileToggle.IsChecked = false; FileToggle.IsEnabled = true; }
+            if (ChatToggle != null) { ChatToggle.IsChecked = false; ChatToggle.IsEnabled = true; }
+        }
+
+        // 右上の歯車（設定）ボタン
+        private void OpenSettings(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dlg = new SettingsWindow { Owner = this };
+                dlg.ShowDialog(); // OK/キャンセルに応じて UiSettings 側からイベントが飛びます
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(ex.Message, "設定", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
     }
 }

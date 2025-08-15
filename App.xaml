@@ -1,210 +1,59 @@
 ﻿<Application x:Class="Explore.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:Explore"
-             StartupUri="MainWindow.xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+	<Application.Resources>
+		<ResourceDictionary>
 
-    <Application.Resources>
-        <ResourceDictionary>
-            <Style x:Key="IconButton" TargetType="Button">
-                <Setter Property="FontFamily" Value="Segoe Fluent Icons"/>
-                <Setter Property="HorizontalAlignment" Value="Center"/>
-                <Setter Property="VerticalAlignment" Value="Center"/>
-                <Setter Property="HorizontalContentAlignment" Value="Center"/>
-                <Setter Property="VerticalContentAlignment" Value="Center"/>
-            </Style>
+			<ResourceDictionary.MergedDictionaries>
+				<ResourceDictionary Source="Themes/LightTheme.xaml"/>
+			</ResourceDictionary.MergedDictionaries>
 
-            <Style x:Key="ToggleIconButton" TargetType="ToggleButton">
-                <Setter Property="FontFamily" Value="Segoe Fluent Icons"/>
-                <Setter Property="HorizontalAlignment" Value="Center"/>
-                <Setter Property="VerticalAlignment" Value="Center"/>
-                <Setter Property="HorizontalContentAlignment" Value="Center"/>
-                <Setter Property="VerticalContentAlignment" Value="Center"/>
-            </Style>
+			<!-- Settings アイコンボタン（MainWindow から参照されるキー） -->
+			<Style x:Key="SettingsIconButton" TargetType="Button">
+				<Setter Property="Width" Value="28"/>
+				<Setter Property="Height" Value="28"/>
+				<Setter Property="Padding" Value="0"/>
+				<Setter Property="Background" Value="Transparent"/>
+				<Setter Property="BorderThickness" Value="0"/>
+				<Setter Property="Foreground" Value="{DynamicResource ThemeBrush}"/>
+				<Setter Property="ToolTip" Value="設定"/>
+				<Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+				<Setter Property="FontSize" Value="16"/>
+				<Setter Property="Content" Value="&#xE713;"/>
+				<Setter Property="HorizontalContentAlignment" Value="Center"/>
+				<Setter Property="VerticalContentAlignment" Value="Center"/>
+				<Setter Property="Cursor" Value="Hand"/>
+				<Setter Property="Template">
+					<Setter.Value>
+						<ControlTemplate TargetType="Button">
+							<Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="4">
+								<ContentPresenter
+									HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+									VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+							</Border>
+							<ControlTemplate.Triggers>
+								<Trigger Property="IsMouseOver" Value="True">
+									<Setter TargetName="Bg" Property="Background" Value="#11000000"/>
+								</Trigger>
+								<Trigger Property="IsEnabled" Value="False">
+									<Setter Property="Opacity" Value="0.5"/>
+								</Trigger>
+							</ControlTemplate.Triggers>
+						</ControlTemplate>
+					</Setter.Value>
+				</Setter>
+			</Style>
 
-            <Style x:Key="SettingsIconButton" TargetType="Button"
-                   BasedOn="{StaticResource IconButton}">
-                <Setter Property="Foreground" Value="Black"/>
-                <Setter Property="Background" Value="Transparent"/>
-                <Setter Property="BorderThickness" Value="0"/>
-                <Setter Property="Padding" Value="12"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border x:Name="border"
-                                    Background="{TemplateBinding Background}"
-                                    CornerRadius="4">
-                                <ContentPresenter HorizontalAlignment="Center" 
-                                                  VerticalAlignment="Center"/>
-                            </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#1F000000"/>
-                                </Trigger>
-                                <Trigger Property="IsPressed" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#33000000"/>
-                                </Trigger>
-                                <Trigger Property="IsEnabled" Value="False">
-                                    <Setter Property="Foreground" Value="#888"/>
-                                    <Setter TargetName="border" Property="Background" Value="Transparent"/>
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
+			<!-- RangeBase 安全化（起動直後の Value 未設定で落ちないように） -->
+			<Style TargetType="ProgressBar">
+				<Setter Property="Minimum" Value="0"/>
+				<Setter Property="Maximum" Value="100"/>
+			</Style>
+			<Style TargetType="Slider">
+				<Setter Property="Minimum" Value="0"/>
+				<Setter Property="Maximum" Value="100"/>
+			</Style>
 
-            <Style x:Key="ToolButton" TargetType="Button"
-                   BasedOn="{StaticResource IconButton}">
-                <Setter Property="FontSize" Value="14"/>
-                <Setter Property="Foreground" Value="Black"/>
-                <Setter Property="Width" Value="24"/>
-                <Setter Property="Height" Value="24"/>
-                <Setter Property="Padding" Value="5"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border x:Name="border"
-                                    Background="Transparent"
-                                    BorderThickness="1">
-                                <ContentPresenter HorizontalAlignment="Center"
-                                                  VerticalAlignment="Center"/>
-                            </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#1F000000"/>
-                                    <Setter TargetName="border" Property="BorderBrush" Value="#FF828790"/>
-                                </Trigger>
-                                <Trigger Property="IsPressed" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#33000000"/>
-                                </Trigger>
-                                <Trigger Property="IsEnabled" Value="False">
-                                    <Setter Property="Foreground" Value="#888"/>
-                                    <Setter TargetName="border" Property="Background" Value="Transparent"/>
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
-            <Style x:Key="ToggleToolButton" TargetType="ToggleButton"
-                   BasedOn="{StaticResource ToggleIconButton}">
-                <Setter Property="FontSize" Value="14"/>
-                <Setter Property="Foreground" Value="Black"/>
-                <Setter Property="Width" Value="24"/>
-                <Setter Property="Height" Value="24"/>
-                <Setter Property="Padding" Value="5"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="ToggleButton">
-                            <Border x:Name="border"
-                                    Background="Transparent"
-                                    BorderThickness="1">
-                                <ContentPresenter HorizontalAlignment="Center"
-                                                  VerticalAlignment="Center"/>
-                            </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#1F000000"/>
-                                    <Setter TargetName="border" Property="BorderBrush" Value="#FF828790"/>
-                                </Trigger>
-                                <Trigger Property="IsChecked" Value="True">
-                                    <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource ThemeBrush}"/>
-                                </Trigger>
-                                <Trigger Property="IsPressed" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#33000000"/>
-                                </Trigger>
-                                <Trigger Property="IsEnabled" Value="False">
-                                    <Setter Property="Foreground" Value="#888"/>
-                                    <Setter TargetName="border" Property="Background" Value="Transparent"/>
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
-            <Style x:Key="DockWindowToolBar" TargetType="ToolBar">
-                <Setter Property="Height" Value="30"/>
-                <Setter Property="Background" Value="Transparent"/>
-            </Style>
-
-            <Style x:Key="CaptionControlButton" TargetType="Button"
-                   BasedOn="{StaticResource IconButton}">
-                <Setter Property="Foreground" Value="White"/>
-                <Setter Property="Background" Value="Transparent"/>
-                <Setter Property="BorderThickness" Value="0"/>
-                <Setter Property="Padding" Value="5"/>
-                <Setter Property="Width" Value="16"/>
-                <Setter Property="Height" Value="16"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border x:Name="border"
-                                    Background="{TemplateBinding Background}"
-                                    BorderThickness="{TemplateBinding BorderThickness}">
-                                <ContentPresenter HorizontalAlignment="Center"
-                                                  VerticalAlignment="Center"/>
-                            </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#FFCAFCFF"/>
-                                    <Setter Property="Foreground" Value="Black"/>
-                                </Trigger>
-                                <Trigger Property="IsPressed" Value="True">
-                                    <Setter Property="Foreground" Value="#33000000"/>
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
-            <Style x:Key="TabToggleStyle" TargetType="ToggleButton">
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="ToggleButton">
-                            <Border x:Name="border"
-                                    BorderBrush="Gray" BorderThickness="1"
-                                    CornerRadius="{TemplateBinding Tag}">
-                                <ContentPresenter HorizontalAlignment="Center"
-                                                  VerticalAlignment="Center" />
-                            </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsChecked" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#FF1A76C6"/>
-                                    <Setter Property="Foreground" Value="White"/>
-                                </Trigger>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#DDACD8FF"/>
-                                </Trigger>
-                                <MultiTrigger>
-                                    <MultiTrigger.Conditions>
-                                        <Condition Property="IsEnabled" Value="True"/>
-                                        <Condition Property="IsMouseOver" Value="False"/>
-                                    </MultiTrigger.Conditions>
-                                    <Setter TargetName="border" Property="Background" Value="White"/>
-                                </MultiTrigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
-            <Style x:Key="LeftTabToggleStyle" TargetType="ToggleButton"
-                   BasedOn="{StaticResource TabToggleStyle}">
-                <Setter Property="Tag" Value="10,0,0,10"/>
-            </Style>
-
-            <Style x:Key="RightTabToggleStyle" TargetType="ToggleButton"
-                   BasedOn="{StaticResource TabToggleStyle}">
-                <Setter Property="Tag" Value="0,10,10,0"/>
-            </Style>
-
-            <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/LightTheme.xaml"/>
-            </ResourceDictionary.MergedDictionaries>
-        </ResourceDictionary>
-    </Application.Resources>
+		</ResourceDictionary>
+	</Application.Resources>
 </Application>
