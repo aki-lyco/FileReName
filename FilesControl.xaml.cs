@@ -107,31 +107,81 @@ namespace Explore
             catch { /* 握りつぶし */ }
 
             // 自動インデックスがONなら、静かにDB投入（ゲージは出さない）
+            // 自動インデックスがONなら、600msディレイ後に軽量スキャン（非再帰・フィルタ・上限付き）
             if (_autoIndex)
             {
                 _indexCts?.Cancel();
                 _indexCts = new CancellationTokenSource();
                 var ct = _indexCts.Token;
 
-                try
+                _ = Task.Run(async () =>
                 {
-                    await _db.EnsureCreatedAsync();
-                    var targets = new List<string> { node.FullPath };
-                    var records = EnumerateRecordsAsync(targets, _includeSubs, ct);
-                    await _db.BulkUpsertAsync(records, batchSize: 500, progress: null, ct: ct);
-                    await RefreshDbCountAsync();
-                }
-                catch (OperationCanceledException) { /* noop */ }
-                catch (Exception ex)
-                {
-                    WpfMessageBox.Show(ex.Message, "Auto Index Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-                finally
-                {
-                    _indexCts?.Dispose();
-                    _indexCts = null;
-                }
+                    try
+                    {
+                        await Task.Delay(600, ct); // 連打対策
+                        await _db.EnsureCreatedAsync();
+
+                        var root = node.FullPath;
+                        if (AutoIndexPolicy.ShouldSkipPath(root)) return;
+
+                        // 非再帰・拡張子/サイズ/システム除外・上限N件
+                        async IAsyncEnumerable<DbFileRecord> EnumerateAuto([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token)
+                        {
+                            int count = 0;
+                            IEnumerable<string> files;
+                            try
+                            {
+                                files = Directory.EnumerateFiles(root, "*", SearchOption.TopDirectoryOnly);
+                            }
+                            catch { yield break; }
+
+                            foreach (var path in files)
+                            {
+                                token.ThrowIfCancellationRequested();
+                                if (AutoIndexPolicy.ShouldSkipPath(path)) continue;
+
+                                FileInfo fi;
+                                try { fi = new FileInfo(path); }
+                                catch { continue; }
+
+                                if (!AutoIndexPolicy.ShouldIndexFile(fi)) continue;
+
+                                yield return new DbFileRecord
+                                {
+                                    Path = fi.FullName,
+                                    FileKey = FileKeyUtil.GetStableKey(fi.FullName),
+                                    Parent = fi.DirectoryName,
+                                    Name = fi.Name,
+                                    Ext = fi.Extension,
+                                    Size = fi.Length,
+                                    MTimeUnix = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeSeconds(),
+                                    CTimeUnix = new DateTimeOffset(fi.CreationTimeUtc).ToUnixTimeSeconds(),
+                                    Mime = null,
+                                    Summary = null,
+                                    Snippet = null,
+                                    Classified = null
+                                };
+
+                                if (++count >= AutoIndexPolicy.MaxFilesPerAutoIndex) yield break;
+                                if ((count & 0x3FF) == 0) await Task.Yield(); // UIに譲る
+                            }
+                        }
+
+                        await _db.BulkUpsertAsync(EnumerateAuto(ct), batchSize: 500, progress: null, ct: ct);
+
+                        // カウント更新はUIスレッドへ
+                        await Dispatcher.InvokeAsync(async () => await RefreshDbCountAsync());
+                    }
+                    catch (OperationCanceledException) { /* 直近選択へ切替 */ }
+                    catch { /* 自動は静かに失敗でOK */ }
+                    finally
+                    {
+                        _indexCts?.Dispose();
+                        _indexCts = null;
+                    }
+                }, ct);
             }
+
         }
 
         // ===== 手動インデックス（メニュー等から呼ぶ想定。XAMLボタンは削除済み） =====
