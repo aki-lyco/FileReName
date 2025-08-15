@@ -1,5 +1,26 @@
 ﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Color x:Key="ThemeColor">#FF197FFF</Color>
-    <SolidColorBrush x:Key="ThemeBrush" Color="{StaticResource ThemeColor}"/>
+
+	<!-- テーマ色（既存） -->
+	<Color x:Key="ThemeColor">#FF197FFF</Color>
+	<SolidColorBrush x:Key="ThemeBrush" Color="{StaticResource ThemeColor}"/>
+
+	<!-- 重要: RangeBase 派生コントロールの既定を安全化
+         ※ Value はスタイルでバインド/固定しない（画面側で必要に応じて設定）
+         ※ これで XAML パース時の 'RangeBase.Value' 例外を回避できます -->
+
+	<!-- ProgressBar の既定（最小/最大だけ定義） -->
+	<Style TargetType="ProgressBar">
+		<Setter Property="Minimum" Value="0"/>
+		<Setter Property="Maximum" Value="100"/>
+		<!-- 見た目の既定が必要なら Height 等をここに追加してOK -->
+		<!-- <Setter Property="Height" Value="14"/> -->
+	</Style>
+
+	<!-- Slider の既定（同様に Value は触らない） -->
+	<Style TargetType="Slider">
+		<Setter Property="Minimum" Value="0"/>
+		<Setter Property="Maximum" Value="100"/>
+	</Style>
+
 </ResourceDictionary>
