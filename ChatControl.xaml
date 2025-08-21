@@ -48,9 +48,7 @@
 			</Grid>
 		</DataTemplate>
 
-		<!-- ＝＝＝ ここから追記：検索結果カード & セレクタ ＝＝＝ -->
-
-		<!-- 検索結果カード（Top5 をボックス表示。各カードに「場所を開く」リンク） -->
+		<!-- ＝＝＝ 検索結果カード & テンプレートセレクタ ＝＝＝ -->
 		<DataTemplate x:Key="SearchCards" DataType="{x:Type local:ChatMessage}">
 			<StackPanel Margin="8" HorizontalAlignment="Left" Width="720">
 				<TextBlock Text="検索結果" FontWeight="SemiBold" Margin="4,0,0,6"/>
@@ -77,7 +75,7 @@
 										<TextBlock Text="{Binding MtimeText}" Foreground="#777" FontSize="12"/>
 									</StackPanel>
 
-									<!-- 埋め込みリンク：場所を開く（code-behind の ResultOpen_Click を呼ぶ） -->
+									<!-- 埋め込みリンク：場所を開く -->
 									<TextBlock>
 										<Hyperlink Click="ResultOpen_Click" Tag="{Binding Path}">
 											場所を開く
@@ -91,12 +89,9 @@
 			</StackPanel>
 		</DataTemplate>
 
-		<!-- テンプレートセレクタ：
-             IsSearchResult=true のメッセージだけ SearchCards を適用。
-             それ以外は null を返し、従来の暗黙 DataTemplate を使わせる。 -->
+		<!-- IsSearchResult=true のメッセージだけ SearchCards を適用 -->
 		<local:ChatTemplateSelector x:Key="ChatTmpl"
                                     SearchTemplate="{StaticResource SearchCards}" />
-		<!-- ＝＝＝ 追記ここまで ＝＝＝ -->
 	</UserControl.Resources>
 
 	<!-- ========= Layout ========= -->
@@ -122,25 +117,21 @@
 				<ColumnDefinition Width="Auto"/>
 			</Grid.ColumnDefinitions>
 
-			<!-- 左：タイトル的な余白（必要ならラベル等） -->
+			<!-- 左：タイトル -->
 			<StackPanel Orientation="Horizontal" Grid.Column="0" VerticalAlignment="Center">
 				<TextBlock Text="Chat" FontSize="16" FontWeight="SemiBold" Foreground="#444" Margin="4,0,0,0"/>
 			</StackPanel>
 
-			<!-- 右：操作群 -->
-			<StackPanel Orientation="Horizontal" Grid.Column="1" VerticalAlignment="Center">
+			<!-- 右：操作群（チャット／デバッグ／検索）  ※幅が足りない時は自動で折り返し -->
+			<WrapPanel Grid.Column="1" VerticalAlignment="Center" ItemHeight="32">
 				<ToggleButton x:Name="ChatToggle" Content="チャット" MinWidth="84" Margin="0,0,8,0"
                               Click="ChatToggle_Click" IsChecked="True"/>
-				<ToggleButton x:Name="NlpToggle" Content="AI正規化" MinWidth="84" Margin="0,0,8,0"
-                              Click="NlpToggle_Click" IsChecked="True"/>
-				<ToggleButton x:Name="DebugToggle" Content="デバッグ" MinWidth="84" Margin="0,0,12,0"
+				<ToggleButton x:Name="DebugToggle" Content="デバッグ" MinWidth="84" Margin="0,0,8,0"
                               Click="DebugToggle_Click" IsChecked="False"/>
-
-				<Button Content="件数" Margin="0,0,8,0" Padding="10,4"
-                        Click="DbCountButton_Click"/>
-				<Button Content="FTS再構築" Margin="0,0,0,0" Padding="10,4"
-                        Click="RebuildButton_Click"/>
-			</StackPanel>
+				<!-- 検索はUIのみ。処理は暫定で NlpToggle_Click に接続 -->
+				<ToggleButton x:Name="NlpToggle" Content="検索" MinWidth="84"
+                              Click="NlpToggle_Click" IsChecked="True"/>
+			</WrapPanel>
 		</Grid>
 
 		<!-- ===== Messages ===== -->
@@ -172,7 +163,7 @@
 			</Grid>
 		</ScrollViewer>
 
-		<!-- 下部へスクロールボタン（中央下に浮かせる） -->
+		<!-- 中央下に浮かせる「下までスクロール」ボタン -->
 		<Button x:Name="ScrollDownButton" Click="ScrollDownButton_Click"
                 Grid.Row="1" Grid.Column="1"
                 FontFamily="Segoe Fluent Icons" Content="&#xF0AE;" FontSize="14"
@@ -189,11 +180,11 @@
 			</Button.Template>
 		</Button>
 
-		<!-- ===== Input ===== -->
+		<!-- ===== Input（見た目はそのまま。MinWidthだけ縮小） ===== -->
 		<Border Grid.Row="2" Grid.Column="1" Padding="10" Margin="0,6,0,16" CornerRadius="28"
                 Background="White" BorderThickness="1" BorderBrush="#FFB0B0B0"
                 MouseDown="InputFocus" Cursor="IBeam"
-                MaxHeight="420" MaxWidth="1280" MinWidth="700">
+                MaxHeight="420" MaxWidth="1280" MinWidth="280">
 			<Border.Effect>
 				<DropShadowEffect BlurRadius="6" ShadowDepth="3" Direction="270" Opacity="0.1"/>
 			</Border.Effect>
@@ -238,7 +229,8 @@
 				</Button>
 
 				<!-- 右：送信（黒い丸に白い矢印） -->
-				<Button FontFamily="Segoe Fluent Icons" Content="&#xF0AD;" FontSize="14" Foreground="White"
+				<Button x:Name="SendButton"
+                        FontFamily="Segoe Fluent Icons" Content="&#xF0AD;" FontSize="14" Foreground="White"
                         Width="36" Height="36" Grid.Row="1" Grid.Column="2"
                         Click="SendButton_Click" Cursor="Hand" ToolTip="送信">
 					<Button.Template>
