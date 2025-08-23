@@ -1,43 +1,39 @@
 ﻿// Explore/FilesControl.xaml.cs
-// - 左：フォルダツリー（展開で遅延ロード）
-// - 中：ファイル一覧（選択フォルダ直下のみ表示）
-// - ツールバー：自動DB更新 / サブフォルダ含む / 手動インデックス / 停止 / 件数表示
-// - 大量件数対策：BulkUpsert（バッチコミット + WAL）＋ キャンセル対応
-// - 進捗UI対応：IsIndexing / IndexPercent / IndexStatusText / IndexedCountText プロパティ追加
-
 using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Windows;               // RoutedEventArgs, MessageBoxButton, MessageBoxImage
-using System.Windows.Controls;      // TreeViewItem
+using System.Windows;
+using System.Windows.Controls;      // TreeViewItem, MenuItem
 using Explore.FileSystem;           // ExplorerViewModel, FolderNode, DefaultFileSystemService
-using Explore.Indexing;             // IndexDatabase, DbFileRecord, FileKeyUtil
-using Microsoft.Data.Sqlite;        // 件数確認ユーティリティ用
-using WpfMessageBox = System.Windows.MessageBox; // ★ WPFのMessageBoxを明示
+using Explore.Indexing;             // IndexDatabase, DbFileRecord, FileKeyUtil, FreshnessService, FreshState
+using Microsoft.Data.Sqlite;
+using WpfMessageBox = System.Windows.MessageBox;
 
 namespace Explore
 {
     public partial class FilesControl : System.Windows.Controls.UserControl, INotifyPropertyChanged
     {
-        // 画面VM（フォルダツリー + ファイル一覧）
+        // 左ペインVM
         private readonly ExplorerViewModel _vm = new(new DefaultFileSystemService());
-        public ExplorerViewModel VM => _vm; // ★ XAML から {Binding VM.*} で参照
+        public ExplorerViewModel VM => _vm;
 
-        // SQLite DB（index.db）
+        // DB ＆ 鮮度
         private static readonly IndexDatabase _db = new();
+        private static readonly FreshnessService _fresh = new(_db);
 
-        // トグル状態
-        private bool _includeSubs;  // サブフォルダを含める（Index時のみ影響）
-        private bool _autoIndex;    // フォルダ選択時に自動Index
+        // トグル（今はUIが無いので false 固定）
+        private bool _includeSubs = false;
 
-        // インデックス処理のキャンセル用
+        // キャンセル
         private CancellationTokenSource? _indexCts;
+        private CancellationTokenSource? _freshCts;
 
-        // ==== 進捗UI用プロパティ ====
+        // 進捗
         private bool _isIndexing;
         public bool IsIndexing { get => _isIndexing; private set { _isIndexing = value; Raise(); } }
 
@@ -50,6 +46,10 @@ namespace Explore
         private string _indexedCountText = "";
         public string IndexedCountText { get => _indexedCountText; private set { _indexedCountText = value; Raise(); } }
 
+        // 鮮度％
+        private double _freshnessPercent;
+        public double FreshnessPercent { get => _freshnessPercent; private set { _freshnessPercent = value; Raise(); } }
+
         public event PropertyChangedEventHandler? PropertyChanged;
         private void Raise([CallerMemberName] string? n = null) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
@@ -57,90 +57,69 @@ namespace Explore
         public FilesControl()
         {
             InitializeComponent();
-
-            // 画面がロードされたら初期化
             Loaded += async (_, __) =>
             {
-                // 進捗用プロパティとVMの両方にバインドするため DataContext は this
                 DataContext = this;
-
                 await _db.EnsureCreatedAsync();
                 await _vm.LoadRootsAsync();
             };
         }
 
-        // ★ 追加：既定DBパスを算出するヘルパー（IndexDatabase と同じロジック）
-        private static string GetDefaultDbPath()
+        // ===== 一覧VM =====
+        public sealed class FileRow : INotifyPropertyChanged
         {
-            var baseDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "FileReName");
-            Directory.CreateDirectory(baseDir);
-            return Path.Combine(baseDir, "index.db");
+            public string FullPath { get; init; } = "";
+            public string Name { get; init; } = "";
+            public string Extension { get; init; } = "";
+            public long Size { get; init; }
+            public DateTime LastWriteTime { get; init; }
+
+            private FreshState _fresh = FreshState.Unindexed;
+            public FreshState FreshState
+            {
+                get => _fresh;
+                set { if (_fresh != value) { _fresh = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FreshState))); } }
+            }
+
+            public event PropertyChangedEventHandler? PropertyChanged;
         }
 
-        // -------- ツリー操作 --------
+        public ObservableCollection<FileRow> Rows { get; } = new();
 
-        // ノード展開時：子フォルダを遅延ロード
+        // ===== ツリー操作 =====
         private async void OnNodeExpanded(object sender, RoutedEventArgs e)
         {
             if (e.OriginalSource is TreeViewItem tvi && tvi.DataContext is FolderNode node)
-            {
                 await _vm.EnsureChildrenLoadedAsync(node);
-            }
         }
 
-        // ノード選択時：ファイル一覧を更新 ＋ 自動IndexがONなら投入
         private async void OnFolderSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
         {
-            if (e.NewValue is FolderNode node)
+            if (e.NewValue is not FolderNode node) return;
+
+            await _vm.NavigateToAsync(node.FullPath);
+
+            // FS→行を構築
+            Rows.Clear();
+            foreach (var f in _vm.Files)
             {
-                await _vm.NavigateToAsync(node.FullPath);
-
-                if (_autoIndex)
+                Rows.Add(new FileRow
                 {
-                    try
-                    {
-                        _indexCts?.Cancel();
-                        _indexCts = new CancellationTokenSource();
-
-                        await _db.EnsureCreatedAsync();
-
-                        var records = EnumerateRecordsAsync(
-                            node.FullPath,
-                            recursive: _includeSubs,
-                            _indexCts.Token);
-
-                        await _db.BulkUpsertAsync(
-                            records,
-                            batchSize: 500,
-                            progress: null,            // 自動時は静かに
-                            ct: _indexCts.Token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // ユーザーが停止
-                    }
-                    catch (Exception ex)
-                    {
-                        WpfMessageBox.Show(ex.Message, "Auto Index Error",
-                            MessageBoxButton.OK, MessageBoxImage.Error);
-                    }
-                }
+                    FullPath = f.FullPath,
+                    Name = f.Name,
+                    Extension = f.Extension,
+                    Size = f.Size,
+                    LastWriteTime = f.LastWriteTime
+                });
             }
+
+            // 行鮮度→全体％
+            _fresh.InvalidateFreshnessCache(node.FullPath);
+            await RefreshRowsFreshnessAsync(node.FullPath);
+            _ = RecalcFreshnessPercentAsync(node.FullPath);
         }
 
-        // -------- トグル（ツールバー） --------
-
-        private void IncludeSubs_Checked(object sender, RoutedEventArgs e) => _includeSubs = true;
-        private void IncludeSubs_Unchecked(object sender, RoutedEventArgs e) => _includeSubs = false;
-
-        private void AutoIndex_Checked(object sender, RoutedEventArgs e) => _autoIndex = true;
-        private void AutoIndex_Unchecked(object sender, RoutedEventArgs e) => _autoIndex = false;
-
-        // -------- コマンド（ツールバーのボタン） --------
-
-        // 選択中フォルダを手動でインデックス投入（進捗表示あり）
+        // ===== ボタン：このフォルダを同期 =====
         private async void OnIndexCurrentFolderClick(object sender, RoutedEventArgs e)
         {
             try
@@ -164,10 +143,9 @@ namespace Explore
                 var prog = new Progress<(long scanned, long inserted)>(p =>
                 {
                     IndexStatusText = $"登録中 {p.scanned:N0} 件（新規 {p.inserted:N0}）";
-                    // パーセントは総件数が不明なので省略（必要なら推定可）
                 });
 
-                var records = EnumerateRecordsAsync(root, recursive: _includeSubs, _indexCts.Token);
+                var records = EnumerateRecordsAsync(root, _includeSubs, _indexCts.Token);
 
                 var (scanned, inserted) = await _db.BulkUpsertAsync(
                     records,
@@ -175,27 +153,22 @@ namespace Explore
                     progress: prog,
                     ct: _indexCts.Token);
 
-                var files = await GetTableCountAsync("files");
-                IndexedCountText = $"DB件数: {files:N0}";
-
-                WpfMessageBox.Show(
-                    $"スキャン: {scanned} 件\n新規: {inserted} 件\nDB: {GetDefaultDbPath()}",
-                    "Index 完了",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-
+                IndexedCountText = $"DB件数: {await GetTableCountAsync("files"):N0}";
                 IndexStatusText = "完了";
+
+                // 鮮度更新
+                _fresh.InvalidateFreshnessCache(root);
+                await RefreshRowsFreshnessAsync(root);
+                _ = RecalcFreshnessPercentAsync(root);
             }
             catch (OperationCanceledException)
             {
                 IndexStatusText = "キャンセルしました";
-                WpfMessageBox.Show("インデックスを中断しました。",
-                    "Index", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
                 IndexStatusText = "エラー: " + ex.Message;
-                WpfMessageBox.Show(ex.Message, "Index Error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                WpfMessageBox.Show(ex.Message, "Index Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -205,39 +178,99 @@ namespace Explore
             }
         }
 
-        // インデックス処理を停止
-        private void OnCancelIndexClick(object sender, RoutedEventArgs e)
-        {
-            _indexCts?.Cancel();
-        }
-
-        // DBの件数を確認
-        private async void OnShowDbCountsClick(object sender, RoutedEventArgs e)
+        // ===== ボタン：差分のみIndex（Unindexedだけ高速UPSERT） =====
+        private async void OnIndexOnlyUnindexedClick(object sender, RoutedEventArgs e)
         {
             try
             {
-                await _db.EnsureCreatedAsync();
+                var root = _vm?.CurrentPath;
+                if (string.IsNullOrWhiteSpace(root)) return;
 
-                var files = await GetTableCountAsync("files");
-                var renms = await GetTableCountAsync("rename_suggestions");
-                var moves = await GetTableCountAsync("moves");
+                int done = 0;
+                foreach (var r in Rows)
+                {
+                    if (r.FreshState != FreshState.Unindexed) continue;
+                    try
+                    {
+                        await _db.UpsertFileFromFsAsync(r.FullPath, CancellationToken.None);
+                        done++;
+                        if ((uint)Environment.TickCount % 64 == 0) await Task.Yield();
+                    }
+                    catch { /* 個別失敗は握りつぶす */ }
+                }
 
-                WpfMessageBox.Show(
-                    $"files: {files}\nrename_suggestions: {renms}\nmoves: {moves}\n\nDB: {GetDefaultDbPath()}",
-                    "DB 状態",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information
-                );
+                _fresh.InvalidateFreshnessCache(root);
+                await RefreshRowsFreshnessAsync(root);
+                _ = RecalcFreshnessPercentAsync(root);
+
+                WpfMessageBox.Show($"差分Index 完了：{done} 件", "差分のみIndex", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                WpfMessageBox.Show(ex.Message, "DB Error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                WpfMessageBox.Show(ex.Message, "差分Index Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
-        // -------- ユーティリティ --------
+        // ===== 行メニュー =====
+        private async void OnReindexFileClick(object sender, RoutedEventArgs e)
+        {
+            var path = (sender as MenuItem)?.CommandParameter as string ?? GetPathFromContext(sender);
+            if (string.IsNullOrWhiteSpace(path)) return;
 
+            try
+            {
+                await _db.UpsertFileFromFsAsync(path!, CancellationToken.None);
+                _fresh.InvalidateFreshnessCache(Path.GetDirectoryName(path!) ?? "");
+                await RefreshRowsFreshnessAsync(_vm.CurrentPath);
+                _ = RecalcFreshnessPercentAsync(_vm.CurrentPath);
+            }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(ex.Message, "ReIndex Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async void OnDeleteFromDbClick(object sender, RoutedEventArgs e)
+        {
+            var path = (sender as MenuItem)?.CommandParameter as string ?? GetPathFromContext(sender);
+            if (string.IsNullOrWhiteSpace(path)) return;
+
+            try
+            {
+                await _db.DeleteByPathAsync(path!, CancellationToken.None);
+                _fresh.InvalidateFreshnessCache(Path.GetDirectoryName(path!) ?? "");
+                await RefreshRowsFreshnessAsync(_vm.CurrentPath);
+                _ = RecalcFreshnessPercentAsync(_vm.CurrentPath);
+            }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(ex.Message, "DB Delete Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void OnOpenLocationClick(object sender, RoutedEventArgs e)
+        {
+            var path = (sender as MenuItem)?.CommandParameter as string ?? GetPathFromContext(sender);
+            if (string.IsNullOrWhiteSpace(path)) return;
+
+            try
+            {
+                var args = $"/select,\"{path}\"";
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", args) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(ex.Message, "Open Location Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private static string? GetPathFromContext(object? sender)
+        {
+            if (sender is MenuItem mi && mi.DataContext is FileRow r1) return r1.FullPath;
+            return null;
+        }
+
+        // ===== ユーティリティ =====
         private async IAsyncEnumerable<DbFileRecord> EnumerateRecordsAsync(
             string root, bool recursive, [EnumeratorCancellation] CancellationToken ct)
         {
@@ -269,13 +302,12 @@ namespace Explore
                         Mime = null,
                         Summary = null,
                         Snippet = null,
-                        Classified = null
+                        Tags = null,
+                        Classified = null,
+                        IndexedAt = 0
                     };
                 }
-                catch
-                {
-                    // 個別失敗はスキップ
-                }
+                catch { /* 個別失敗はスキップ */ }
 
                 if (rec != null) yield return rec;
                 if ((uint)Environment.TickCount % 2048 == 0)
@@ -285,12 +317,39 @@ namespace Explore
 
         private async Task<long> GetTableCountAsync(string table)
         {
-            using var conn = new SqliteConnection(
-                new SqliteConnectionStringBuilder { DataSource = GetDefaultDbPath() }.ToString());
+            using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = IndexDatabase.DatabasePath }.ToString());
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
             return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
+        }
+
+        // ===== 鮮度更新 =====
+        private async Task RefreshRowsFreshnessAsync(string scopePath)
+        {
+            _freshCts?.Cancel();
+            _freshCts = new CancellationTokenSource();
+
+            try
+            {
+                foreach (var row in Rows)
+                {
+                    var st = await _fresh.GetFreshStateByPathAsync(row.FullPath, _freshCts.Token);
+                    row.FreshState = st;
+                    if ((uint)Environment.TickCount % 256 == 0) await Task.Yield();
+                }
+            }
+            catch (OperationCanceledException) { /* ignore */ }
+        }
+
+        private async Task RecalcFreshnessPercentAsync(string scopePath)
+        {
+            try
+            {
+                var pct = await _fresh.CalcFreshnessPercentAsync(scopePath, CancellationToken.None);
+                FreshnessPercent = Math.Clamp(pct * 100.0, 0.0, 100.0);
+            }
+            catch { /* ignore */ }
         }
     }
 }

@@ -1,12 +1,11 @@
 ﻿<Application x:Class="Explore.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnMainWindowClose">
 	<Application.Resources>
 		<ResourceDictionary>
 
-			<ResourceDictionary.MergedDictionaries>
-				<ResourceDictionary Source="Themes/LightTheme.xaml"/>
-			</ResourceDictionary.MergedDictionaries>
+			<!-- ★ フォールバックの独自キーは置かない（LightTheme のキーと衝突させない） -->
 
 			<!-- Settings アイコンボタン（MainWindow から参照されるキー） -->
 			<Style x:Key="SettingsIconButton" TargetType="Button">
@@ -15,7 +14,8 @@
 				<Setter Property="Padding" Value="0"/>
 				<Setter Property="Background" Value="Transparent"/>
 				<Setter Property="BorderThickness" Value="0"/>
-				<Setter Property="Foreground" Value="{DynamicResource ThemeBrush}"/>
+				<!-- テーマ未読込でも安全な既定色を使用 -->
+				<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
 				<Setter Property="ToolTip" Value="設定"/>
 				<Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
 				<Setter Property="FontSize" Value="16"/>
@@ -28,8 +28,8 @@
 						<ControlTemplate TargetType="Button">
 							<Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="4">
 								<ContentPresenter
-									HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-									VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+								  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+								  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
 							</Border>
 							<ControlTemplate.Triggers>
 								<Trigger Property="IsMouseOver" Value="True">
@@ -54,6 +54,8 @@
 				<Setter Property="Maximum" Value="100"/>
 			</Style>
 
+			<!-- ※ MergedDictionaries は App.xaml では使わず、
+           App.xaml.cs 側の TryLoadThemeDictionary() で読み込みます -->
 		</ResourceDictionary>
 	</Application.Resources>
 </Application>

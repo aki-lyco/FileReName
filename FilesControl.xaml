@@ -9,79 +9,124 @@
              mc:Ignorable="d"
              d:DesignHeight="600" d:DesignWidth="1000">
 
-	<UserControl.Resources>
-		<conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
-		<Style x:Key="GridHeader" TargetType="GridViewColumnHeader">
-			<Setter Property="HorizontalContentAlignment" Value="Left"/>
-			<Setter Property="Padding" Value="4,0,4,0"/>
-		</Style>
-	</UserControl.Resources>
+    <UserControl.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
+        <!-- 鮮度用コンバータ -->
+        <conv:FreshStateToGlyphConverter x:Key="FreshGlyph"/>
+        <conv:FreshStateToBrushConverter x:Key="FreshBrush"/>
+        <conv:FreshStateToTipConverter   x:Key="FreshTip"/>
 
-	<Grid>
-		<Grid.RowDefinitions>
-			<RowDefinition Height="Auto"/>
-			<RowDefinition Height="*"/>
-		</Grid.RowDefinitions>
+        <Style x:Key="GridHeader" TargetType="GridViewColumnHeader">
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Padding" Value="4,0,4,0"/>
+        </Style>
+    </UserControl.Resources>
 
-		<!-- 上部：進捗（Toolbar/StatusBarは使わない） -->
-		<Border Grid.Row="0" Padding="8,6" BorderBrush="#DDD" BorderThickness="0,0,0,1">
-			<StackPanel Orientation="Vertical">
-				<ProgressBar Minimum="0" Maximum="100" Height="10"
-							 Value="{Binding IndexPercent, ElementName=root, Mode=OneWay}"
-							 Visibility="{Binding IsIndexing, ElementName=root, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"/>
-				<StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-					<TextBlock Text="{Binding IndexStatusText, ElementName=root, Mode=OneWay}"/>
-					<TextBlock Text="  •  " Margin="2,0"/>
-					<TextBlock Text="{Binding IndexedCountText, ElementName=root, Mode=OneWay}" Foreground="Gray"/>
-				</StackPanel>
-			</StackPanel>
-		</Border>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
 
-		<!-- 下部：2ペイン -->
-		<Grid Grid.Row="1">
-			<Grid.ColumnDefinitions>
-				<ColumnDefinition Width="300"/>
-				<ColumnDefinition Width="5"/>
-				<ColumnDefinition Width="*"/>
-			</Grid.ColumnDefinitions>
+        <!-- 上部：進捗 + 鮮度％ + 同期ボタン -->
+        <Border Grid.Row="0" Padding="8,6" BorderBrush="#DDD" BorderThickness="0,0,0,1">
+            <DockPanel LastChildFill="True">
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                    <Button Content="差分のみIndex" Click="OnIndexOnlyUnindexedClick" Margin="0,0,6,0"/>
+                    <Button Content="このフォルダを同期" Click="OnIndexCurrentFolderClick"/>
+                </StackPanel>
 
-			<!-- 左：フォルダツリー -->
-			<Border Grid.Column="0" BorderBrush="#DDD" BorderThickness="0,0,1,0">
-				<TreeView x:Name="TreeViewRoot"
-						  ItemsSource="{Binding VM.Roots, ElementName=root}"
-						  SelectedItemChanged="OnFolderSelected"
-						  ScrollViewer.CanContentScroll="True">
-					<TreeView.ItemContainerStyle>
-						<Style TargetType="TreeViewItem">
-							<EventSetter Event="Expanded" Handler="OnNodeExpanded"/>
-						</Style>
-					</TreeView.ItemContainerStyle>
-					<TreeView.Resources>
-						<HierarchicalDataTemplate DataType="{x:Type fs:FolderNode}"
-												  ItemsSource="{Binding Children}">
-							<TextBlock Text="{Binding Name}"/>
-						</HierarchicalDataTemplate>
-					</TreeView.Resources>
-				</TreeView>
-			</Border>
+                <StackPanel Orientation="Vertical">
+                    <ProgressBar Minimum="0" Maximum="100" Height="10"
+                                 Value="{Binding IndexPercent, ElementName=root, Mode=OneWay}"
+                                 Visibility="{Binding IsIndexing, ElementName=root, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding IndexStatusText, ElementName=root, Mode=OneWay}"/>
+                        <TextBlock Text="  •  " Margin="2,0"/>
+                        <TextBlock Text="{Binding IndexedCountText, ElementName=root, Mode=OneWay}" Foreground="Gray"/>
+                        <TextBlock Text="  •  " Margin="2,0"/>
+                        <TextBlock>
+                            <Run Text="鮮度: "/>
+                            <Run Text="{Binding FreshnessPercent, ElementName=root, Mode=OneWay, StringFormat={}{0:F0}%}"/>
+                        </TextBlock>
+                    </StackPanel>
+                </StackPanel>
+            </DockPanel>
+        </Border>
 
-			<!-- 仕切り -->
-			<GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#EEE"/>
+        <!-- 下部：2ペイン -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300"/>
+                <ColumnDefinition Width="5"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-			<!-- 右：ファイル一覧（FileItem に合わせた列名） -->
-			<Border Grid.Column="2" BorderBrush="#DDD" BorderThickness="0">
-				<ListView ItemsSource="{Binding VM.Files, ElementName=root}">
-					<ListView.View>
-						<GridView AllowsColumnReorder="True">
-							<GridViewColumn Header="名前"      DisplayMemberBinding="{Binding Name}"           Width="260"/>
-							<GridViewColumn Header="拡張子"    DisplayMemberBinding="{Binding Extension}"      Width="100"/>
-							<GridViewColumn Header="サイズ"    DisplayMemberBinding="{Binding Size}"           Width="120"/>
-							<GridViewColumn Header="更新日時"  DisplayMemberBinding="{Binding LastWriteTime}"  Width="180"/>
-							<GridViewColumn Header="パス"      DisplayMemberBinding="{Binding FullPath}"       Width="400"/>
-						</GridView>
-					</ListView.View>
-				</ListView>
-			</Border>
-		</Grid>
-	</Grid>
+            <!-- 左：フォルダツリー -->
+            <Border Grid.Column="0" BorderBrush="#DDD" BorderThickness="0,0,1,0">
+                <TreeView x:Name="TreeViewRoot"
+                          ItemsSource="{Binding VM.Roots, ElementName=root}"
+                          SelectedItemChanged="OnFolderSelected"
+                          ScrollViewer.CanContentScroll="True">
+                    <TreeView.ItemContainerStyle>
+                        <Style TargetType="TreeViewItem">
+                            <EventSetter Event="Expanded" Handler="OnNodeExpanded"/>
+                        </Style>
+                    </TreeView.ItemContainerStyle>
+                    <TreeView.Resources>
+                        <HierarchicalDataTemplate DataType="{x:Type fs:FolderNode}"
+                                                  ItemsSource="{Binding Children}">
+                            <TextBlock Text="{Binding Name}"/>
+                        </HierarchicalDataTemplate>
+                    </TreeView.Resources>
+                </TreeView>
+            </Border>
+
+            <!-- 仕切り -->
+            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#EEE"/>
+
+            <!-- 右：ファイル一覧（Rowsを表示） -->
+            <Border Grid.Column="2" BorderBrush="#DDD" BorderThickness="0">
+                <ListView ItemsSource="{Binding Rows, ElementName=root}">
+                    <ListView.View>
+                        <GridView AllowsColumnReorder="True">
+                            <!-- 状態（鮮度） -->
+                            <GridViewColumn Header="状態" Width="64">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding FreshState, Converter={StaticResource FreshGlyph}}"
+                                                   Foreground="{Binding FreshState, Converter={StaticResource FreshBrush}}"
+                                                   ToolTip="{Binding FreshState, Converter={StaticResource FreshTip}}"
+                                                   FontSize="16" HorizontalAlignment="Center"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+
+                            <GridViewColumn Header="名前"      DisplayMemberBinding="{Binding Name}"           Width="260"/>
+                            <GridViewColumn Header="拡張子"    DisplayMemberBinding="{Binding Extension}"      Width="100"/>
+                            <GridViewColumn Header="サイズ"    DisplayMemberBinding="{Binding Size}"           Width="120"/>
+                            <GridViewColumn Header="更新日時"  DisplayMemberBinding="{Binding LastWriteTime}"  Width="180"/>
+                            <GridViewColumn Header="パス"      DisplayMemberBinding="{Binding FullPath}"       Width="400"/>
+                        </GridView>
+                    </ListView.View>
+
+                    <!-- 行メニュー -->
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="ContextMenu">
+                                <Setter.Value>
+                                    <ContextMenu>
+                                        <MenuItem Header="このファイルを再Index" Click="OnReindexFileClick" CommandParameter="{Binding FullPath}"/>
+                                        <MenuItem Header="DBから削除（行のみ）" Click="OnDeleteFromDbClick" CommandParameter="{Binding FullPath}"/>
+                                        <Separator/>
+                                        <MenuItem Header="場所を開く（Explorer）" Click="OnOpenLocationClick" CommandParameter="{Binding FullPath}"/>
+                                    </ContextMenu>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                </ListView>
+            </Border>
+        </Grid>
+    </Grid>
 </UserControl>
