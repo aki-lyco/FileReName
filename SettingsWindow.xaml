@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="設定"
-        Height="520" Width="640"
+        Height="560" Width="680"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize">
 	<Grid>
@@ -177,6 +177,59 @@
 
 							<TextBlock Margin="0,10,0,0" Foreground="#666" TextWrapping="Wrap">
 								※ マークは一覧表示や進捗UIで使われます。表示仕様は将来変更される場合があります。
+							</TextBlock>
+						</StackPanel>
+					</Border>
+				</ScrollViewer>
+			</TabItem>
+
+			<!-- ========== AI ========== -->
+			<TabItem Header="AI">
+				<ScrollViewer VerticalScrollBarVisibility="Auto">
+					<Border Padding="16">
+						<StackPanel>
+							<TextBlock Text="Gemini API キー" FontSize="16" FontWeight="SemiBold"/>
+							<TextBlock Foreground="#666" TextWrapping="Wrap" Margin="0,6,0,0">
+								AI検索・分類などで使用する API キーを保存します。保存先は「ユーザー環境変数」または
+								「アプリデータ（%APPDATA%\Explore\gemini_api_key.txt）」から選べます。
+							</TextBlock>
+
+							<!-- 保存先 -->
+							<GroupBox Header="保存先" Margin="0,8,0,0">
+								<StackPanel Margin="8,4,8,0">
+									<RadioButton x:Name="StoreEnvRadio" Content="ユーザー環境変数（GEMINI_API_KEY）" IsChecked="True"/>
+									<RadioButton x:Name="StoreFileRadio" Content="アプリデータに保存（%APPDATA%\Explore\gemini_api_key.txt）" Margin="0,4,0,0"/>
+								</StackPanel>
+							</GroupBox>
+
+							<!-- API キー入力 -->
+							<GroupBox Header="API キー" Margin="0,8,0,0">
+								<Grid Margin="8">
+									<Grid.RowDefinitions>
+										<RowDefinition Height="Auto"/>
+										<RowDefinition Height="Auto"/>
+									</Grid.RowDefinitions>
+									<Grid.ColumnDefinitions>
+										<ColumnDefinition Width="*"/>
+										<ColumnDefinition Width="Auto"/>
+									</Grid.ColumnDefinitions>
+
+									<!-- Password / Plain 切替 -->
+									<PasswordBox x:Name="ApiKeyBox" Grid.Row="0" Grid.Column="0" Margin="0,0,8,0" />
+									<TextBox x:Name="ApiKeyBoxPlain" Grid.Row="0" Grid.Column="0" Margin="0,0,8,0" Visibility="Collapsed"/>
+
+									<CheckBox x:Name="ShowApiSwitch" Grid.Row="0" Grid.Column="1"
+                                              Content="表示" VerticalAlignment="Center"
+                                              Checked="OnShowApiChecked" Unchecked="OnShowApiChecked"/>
+
+									<TextBlock x:Name="ApiSourceNote" Grid.Row="1" Grid.ColumnSpan="2"
+                                               Foreground="#666" Margin="0,6,0,0" TextWrapping="Wrap"/>
+								</Grid>
+							</GroupBox>
+
+							<TextBlock Foreground="#666" TextWrapping="Wrap" Margin="0,8,0,0">
+								保存後、現在のアプリでは直ちに利用可能です（環境変数はこのプロセスにも反映します）。
+								ほかのアプリ／古いプロセスでは再起動が必要な場合があります。
 							</TextBlock>
 						</StackPanel>
 					</Border>
