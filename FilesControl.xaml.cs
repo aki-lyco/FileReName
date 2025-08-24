@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -16,7 +17,6 @@ using Explore.FileSystem;
 using Explore.Indexing;
 using Microsoft.Data.Sqlite;
 using WpfMessageBox = System.Windows.MessageBox;
-// ★ WPF 入力系をエイリアスで明示（KeyEventArgs の曖昧参照を解消）
 using Input = System.Windows.Input;
 
 namespace Explore
@@ -28,8 +28,6 @@ namespace Explore
 
         private static readonly IndexDatabase _db = new();
         private static readonly FreshnessService _fresh = new(_db);
-
-        private bool _includeSubs = false;
 
         private CancellationTokenSource? _indexCts;
         private CancellationTokenSource? _freshCts;
@@ -50,17 +48,44 @@ namespace Explore
         public double FreshnessPercent { get => _freshnessPercent; private set { _freshnessPercent = value; Raise(); } }
 
         public event PropertyChangedEventHandler? PropertyChanged;
-        private void Raise([CallerMemberName] string? n = null) =>
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
+        private void Raise([CallerMemberName] string? n = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
 
         public FilesControl()
         {
             InitializeComponent();
+
+            // ★ TreeView のイベントをコード側で紐付け（XAML直書きなし）
+            FolderTree.SelectedItemChanged += OnFolderSelected;
+            FolderTree.AddHandler(TreeViewItem.ExpandedEvent, new RoutedEventHandler(OnNodeExpanded));
+
+            // ボタンや DataGrid のイベントもここで登録
+            BtnNewCreate.Click += OnNewButtonClick;
+            BtnIndex.Click += OnIndexCurrentFolderClick;
+            BtnIndexDiff.Click += OnIndexOnlyUnindexedClick;
+            BtnRecycle.Click += OnDeleteClick;
+
+            FilesGrid.MouseDoubleClick += OnFilesGridDoubleClick;
+            FilesGrid.KeyDown += OnFilesGridKeyDown;
+
+            // 行メニュー/ツリーメニューは Tag で一括ハンドリング
+            FilesGrid.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnFilesGridMenuClick));
+            FolderTree.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnFolderTreeMenuClick));
+
+            // 初期ロード
             Loaded += async (_, __) =>
             {
                 DataContext = this;
                 await _db.EnsureCreatedAsync();
                 await _vm.LoadRootsAsync();
+
+                // ★ 初期表示：最初のルートを展開して右ペインへ表示
+                if (_vm.Roots.Count > 0)
+                {
+                    var first = _vm.Roots[0];
+                    await _vm.EnsureChildrenLoadedAsync(first);
+                    await NavigateAndFillAsync(first.FullPath);
+                }
             };
         }
 
@@ -85,19 +110,24 @@ namespace Explore
 
         public ObservableCollection<FileRow> Rows { get; } = new();
 
-        // ===== ツリー操作 =====
-        private async void OnNodeExpanded(object sender, RoutedEventArgs e)
+        // ===== フォルダ選択/展開 =====
+        private async void OnFolderSelected(object? sender, RoutedPropertyChangedEventArgs<object> e)
+        {
+            if (e.NewValue is not FolderNode node) return;
+            await NavigateAndFillAsync(node.FullPath);
+        }
+
+        private async void OnNodeExpanded(object? sender, RoutedEventArgs e)
         {
             if (e.OriginalSource is TreeViewItem tvi && tvi.DataContext is FolderNode node)
                 await _vm.EnsureChildrenLoadedAsync(node);
         }
 
-        private async void OnFolderSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
+        private async Task NavigateAndFillAsync(string? path)
         {
-            if (e.NewValue is not FolderNode node) return;
+            if (string.IsNullOrWhiteSpace(path)) return;
 
-            await _vm.NavigateToAsync(node.FullPath);
-
+            await _vm.NavigateToAsync(path);
             Rows.Clear();
             foreach (var f in _vm.Files)
             {
@@ -111,16 +141,13 @@ namespace Explore
                 });
             }
 
-            var root = _vm.CurrentPath;
-            if (string.IsNullOrWhiteSpace(root)) return;
-
-            _fresh.InvalidateFreshnessCache(root!);
-            await RefreshRowsFreshnessAsync(root!);
-            _ = RecalcFreshnessPercentAsync(root!);
+            _fresh.InvalidateFreshnessCache(path);
+            await RefreshRowsFreshnessAsync(path);
+            _ = RecalcFreshnessPercentAsync(path);
         }
 
-        // ===== ボタン：このフォルダを同期 =====
-        private async void OnIndexCurrentFolderClick(object sender, RoutedEventArgs e)
+        // ===== インデックス操作 =====
+        private async void OnIndexCurrentFolderClick(object? sender, RoutedEventArgs e)
         {
             try
             {
@@ -135,19 +162,15 @@ namespace Explore
                 }
 
                 await _db.EnsureCreatedAsync();
-
                 IsIndexing = true;
                 IndexPercent = 0;
                 IndexStatusText = "準備中…";
 
                 var prog = new Progress<(long scanned, long inserted)>(p =>
-                {
-                    IndexStatusText = $"登録中 {p.scanned:N0} 件（新規 {p.inserted:N0}）";
-                });
+                    IndexStatusText = $"登録中 {p.scanned:N0} 件（新規 {p.inserted:N0}）");
 
-                var records = EnumerateRecordsAsync(root!, _includeSubs, _indexCts.Token);
-
-                var (scanned, inserted) = await _db.BulkUpsertAsync(
+                var records = EnumerateRecordsAsync(root!, recursive: false, _indexCts.Token);
+                var (_, inserted) = await _db.BulkUpsertAsync(
                     records, batchSize: 500, progress: prog, ct: _indexCts.Token);
 
                 IndexedCountText = $"DB件数: {await GetTableCountAsync("files"):N0}";
@@ -174,8 +197,7 @@ namespace Explore
             }
         }
 
-        // ===== ボタン：差分のみIndex =====
-        private async void OnIndexOnlyUnindexedClick(object sender, RoutedEventArgs e)
+        private async void OnIndexOnlyUnindexedClick(object? sender, RoutedEventArgs e)
         {
             try
             {
@@ -186,12 +208,7 @@ namespace Explore
                 foreach (var r in Rows)
                 {
                     if (r.FreshState != FreshState.Unindexed) continue;
-                    try
-                    {
-                        await _db.UpsertFileFromFsAsync(r.FullPath, CancellationToken.None);
-                        done++;
-                        if ((uint)Environment.TickCount % 64 == 0) await Task.Yield();
-                    }
+                    try { await _db.UpsertFileFromFsAsync(r.FullPath, CancellationToken.None); done++; }
                     catch { /* ignore */ }
                 }
 
@@ -208,62 +225,82 @@ namespace Explore
             }
         }
 
-        // ===== 行メニュー =====
-        private async void OnReindexFileClick(object sender, RoutedEventArgs e)
+        // ===== DataGrid：開く（ダブルクリック/Enter） =====
+        private void OnFilesGridDoubleClick(object? sender, Input.MouseButtonEventArgs e)
         {
-            var path = (sender as MenuItem)?.CommandParameter as string ?? GetPathFromContext(sender);
-            if (string.IsNullOrWhiteSpace(path)) return;
+            var dep = (DependencyObject)e.OriginalSource;
+            while (dep != null && dep is not DataGridRow && dep is not DataGrid)
+                dep = VisualTreeHelper.GetParent(dep);
 
-            try
+            if (FilesGrid?.SelectedItem is FileRow fr)
             {
-                await _db.UpsertFileFromFsAsync(path!, CancellationToken.None);
-
-                var current = _vm?.CurrentPath ?? string.Empty;
-                var dir = Path.GetDirectoryName(path!) ?? string.Empty;
-                _fresh.InvalidateFreshnessCache(!string.IsNullOrWhiteSpace(dir) ? dir : current);
-
-                if (!string.IsNullOrWhiteSpace(current))
-                {
-                    await RefreshRowsFreshnessAsync(current);
-                    _ = RecalcFreshnessPercentAsync(current);
-                }
-            }
-            catch (Exception ex)
-            {
-                WpfMessageBox.Show(ex.Message, "ReIndex Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                OpenFile(fr.FullPath);
+                e.Handled = true;
             }
         }
 
-        private async void OnDeleteFromDbClick(object sender, RoutedEventArgs e)
+        private void OnFilesGridKeyDown(object? sender, Input.KeyEventArgs e)
         {
-            var path = (sender as MenuItem)?.CommandParameter as string ?? GetPathFromContext(sender);
-            if (string.IsNullOrWhiteSpace(path)) return;
-
-            try
+            if (e.Key == Input.Key.Enter && FilesGrid?.SelectedItem is FileRow fr)
             {
-                await _db.DeleteByPathAsync(path!, CancellationToken.None);
-
-                var current = _vm?.CurrentPath ?? string.Empty;
-                var dir = Path.GetDirectoryName(path!) ?? string.Empty;
-                _fresh.InvalidateFreshnessCache(!string.IsNullOrWhiteSpace(dir) ? dir : current);
-
-                if (!string.IsNullOrWhiteSpace(current))
-                {
-                    await RefreshRowsFreshnessAsync(current);
-                    _ = RecalcFreshnessPercentAsync(current);
-                }
-            }
-            catch (Exception ex)
-            {
-                WpfMessageBox.Show(ex.Message, "DB Delete Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                OpenFile(fr.FullPath);
+                e.Handled = true;
             }
         }
 
-        private void OnOpenLocationClick(object sender, RoutedEventArgs e)
+        // ===== 行メニュー（Tagで振り分け） =====
+        private void OnFilesGridMenuClick(object? sender, RoutedEventArgs e)
         {
-            var path = (sender as MenuItem)?.CommandParameter as string ?? GetPathFromContext(sender);
+            if (e.OriginalSource is not MenuItem mi) return;
+            var tag = mi.Tag as string ?? "";
+            var path = (mi.CommandParameter as string)
+                       ?? (mi.DataContext as FileRow)?.FullPath;
             if (string.IsNullOrWhiteSpace(path)) return;
 
+            switch (tag)
+            {
+                case "OpenFile": OpenFile(path); break;
+                case "DeleteFile": _ = DeleteFilesAsync(new[] { path }); break;
+                case "ReindexFile": _ = ReindexOneAsync(path); break;
+                case "DeleteDbRecord": _ = DeleteDbRecordAsync(path); break;
+                case "OpenLocation": OpenLocation(path); break;
+            }
+        }
+
+        // ===== ツリーメニュー（Tagで振り分け） =====
+        private void OnFolderTreeMenuClick(object? sender, RoutedEventArgs e)
+        {
+            if (e.OriginalSource is not MenuItem mi) return;
+            var tag = mi.Tag as string ?? "";
+            if (tag != "DeleteFolder") return;
+
+            var path = mi.CommandParameter as string;
+            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
+
+            _ = DeleteFolderAsync(path);
+        }
+
+        // ===== 操作実体 =====
+        private void OpenFile(string path)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    WpfMessageBox.Show($"ファイルが存在しません。\n{path}", "開く", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                var psi = new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true, Verb = "open" };
+                System.Diagnostics.Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(ex.Message, "開くエラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void OpenLocation(string path)
+        {
             try
             {
                 var args = $"/select,\"{path}\"";
@@ -275,64 +312,113 @@ namespace Explore
             }
         }
 
-        // ===== 追加：開く（ダブルクリック／Enter／右クリック） =====
-        private void OnFilesGridDoubleClick(object sender, Input.MouseButtonEventArgs e)
-        {
-            // ヘッダや空白のダブルクリックは無視
-            var dep = (DependencyObject)e.OriginalSource;
-            while (dep != null && dep is not DataGridRow && dep is not DataGridCell && dep is not DataGrid)
-                dep = VisualTreeHelper.GetParent(dep);
-
-            if (dep is DataGridRow row && row.Item is FileRow fr)
-            {
-                OpenFile(fr.FullPath);
-                e.Handled = true;
-                return;
-            }
-
-            if (FilesGrid?.SelectedItem is FileRow sel)
-            {
-                OpenFile(sel.FullPath);
-                e.Handled = true;
-            }
-        }
-
-        private void OnFilesGridKeyDown(object sender, Input.KeyEventArgs e) // ★ ここを WPF に固定
-        {
-            if (e.Key == Input.Key.Enter && FilesGrid?.SelectedItem is FileRow fr)
-            {
-                OpenFile(fr.FullPath);
-                e.Handled = true;
-            }
-        }
-
-        private void OnOpenFileClick(object sender, RoutedEventArgs e)
-        {
-            var path = (sender as MenuItem)?.CommandParameter as string ?? GetPathFromContext(sender);
-            if (string.IsNullOrWhiteSpace(path)) return;
-            OpenFile(path!);
-        }
-
-        private void OpenFile(string path)
+        private async Task ReindexOneAsync(string path)
         {
             try
             {
-                if (!File.Exists(path))
-                {
-                    WpfMessageBox.Show($"ファイルが存在しません。\n{path}", "開く", MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
-                var psi = new System.Diagnostics.ProcessStartInfo(path)
-                {
-                    UseShellExecute = true,
-                    Verb = "open"
-                };
-                System.Diagnostics.Process.Start(psi);
+                await _db.UpsertFileFromFsAsync(path, CancellationToken.None);
+                var dir = Path.GetDirectoryName(path) ?? _vm.CurrentPath ?? "";
+                _fresh.InvalidateFreshnessCache(dir);
+                await RefreshRowsFreshnessAsync(dir);
+                _ = RecalcFreshnessPercentAsync(dir);
             }
             catch (Exception ex)
             {
-                WpfMessageBox.Show(ex.Message, "開くエラー", MessageBoxButton.OK, MessageBoxImage.Error);
+                WpfMessageBox.Show(ex.Message, "ReIndex Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private async Task DeleteDbRecordAsync(string path)
+        {
+            try
+            {
+                await _db.DeleteByPathAsync(path, CancellationToken.None);
+                var dir = Path.GetDirectoryName(path) ?? _vm.CurrentPath ?? "";
+                _fresh.InvalidateFreshnessCache(dir);
+                await RefreshRowsFreshnessAsync(dir);
+                _ = RecalcFreshnessPercentAsync(dir);
+            }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(ex.Message, "DB Delete Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // ツールバー：選択をゴミ箱へ
+        private async void OnDeleteClick(object? sender, RoutedEventArgs e)
+        {
+            var selected = FilesGrid?.SelectedItems?.OfType<FileRow>().Select(r => r.FullPath).ToList() ?? new();
+            if (selected.Count > 0) { await DeleteFilesAsync(selected); return; }
+
+            if (FolderTree?.SelectedItem is FolderNode node && !string.IsNullOrWhiteSpace(node.FullPath))
+            {
+                await DeleteFolderAsync(node.FullPath);
+                return;
+            }
+
+            WpfMessageBox.Show("削除するファイルまたはフォルダーを選択してください。", "削除", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private async Task DeleteFilesAsync(IEnumerable<string> paths)
+        {
+            var list = paths.ToList();
+            if (!ConfirmDelete("選択したファイルをゴミ箱へ移動", list)) return;
+
+            await DeleteToRecycleBinAsync(list);
+            await RefreshCurrentFolderViewAsync();
+        }
+
+        private async Task DeleteFolderAsync(string path)
+        {
+            if (!ConfirmDelete("フォルダーをゴミ箱へ移動", new[] { path })) return;
+
+            var parent = Path.GetDirectoryName(path);
+            await DeleteToRecycleBinAsync(new[] { path });
+
+            if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
+                await NavigateAndFillAsync(parent);
+            else
+                await RefreshCurrentFolderViewAsync();
+        }
+
+        private static bool ConfirmDelete(string title, IEnumerable<string> paths)
+        {
+            var list = paths.ToList();
+            var first10 = list.Take(10).Select(p => "・" + Path.GetFileName(p));
+            var more = list.Count - 10;
+            var msg = "以下をWindowsのごみ箱へ移動します。よろしいですか？\n\n"
+                      + string.Join("\n", first10)
+                      + (more > 0 ? $"\n…ほか {more} 件" : "")
+                      + "\n\n※ ごみ箱から復元できます。";
+            return WpfMessageBox.Show(msg, title, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        }
+
+        private static Task DeleteToRecycleBinAsync(IEnumerable<string> paths)
+        {
+            return Task.Run(() =>
+            {
+                foreach (var p in paths)
+                {
+                    try
+                    {
+                        if (File.Exists(p))
+                        {
+                            Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
+                                p,
+                                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                                Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                        }
+                        else if (Directory.Exists(p))
+                        {
+                            Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
+                                p,
+                                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                                Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                        }
+                    }
+                    catch { /* 個別失敗は無視（必要ならログ） */ }
+                }
+            });
         }
 
         private static string? GetPathFromContext(object? sender)
@@ -381,8 +467,7 @@ namespace Explore
                 catch { }
 
                 if (rec != null) yield return rec;
-                if ((uint)Environment.TickCount % 2048 == 0)
-                    await Task.Yield();
+                if ((uint)Environment.TickCount % 2048 == 0) await Task.Yield();
             }
         }
 
@@ -423,43 +508,41 @@ namespace Explore
             catch { /* ignore */ }
         }
 
-        // ==== 一覧再読込 ====
         private async Task RefreshCurrentFolderViewAsync()
         {
             var root = _vm?.CurrentPath;
             if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return;
-
-            await _vm.NavigateToAsync(root!);
-
-            Rows.Clear();
-            foreach (var f in _vm.Files)
-            {
-                Rows.Add(new FileRow
-                {
-                    FullPath = f.FullPath,
-                    Name = f.Name,
-                    Extension = f.Extension,
-                    Size = f.Size,
-                    LastWriteTime = f.LastWriteTime
-                });
-            }
-
-            _fresh.InvalidateFreshnessCache(root!);
-            await RefreshRowsFreshnessAsync(root!);
-            _ = RecalcFreshnessPercentAsync(root!);
+            await NavigateAndFillAsync(root);
         }
 
-        #region NewFileCreate
-        private void OnNewButtonClick(object sender, RoutedEventArgs e)
+        #region NewFileCreate（動的メニュー）
+        private void OnNewButtonClick(object? sender, RoutedEventArgs e)
         {
-            if (sender is FrameworkElement fe && fe.ContextMenu != null)
-            {
-                fe.ContextMenu.PlacementTarget = fe;
-                fe.ContextMenu.IsOpen = true;
-            }
+            if (sender is not FrameworkElement fe) return;
+
+            var cm = new ContextMenu();
+            static MenuItem MI(string header, RoutedEventHandler h)
+            { var m = new MenuItem { Header = header }; m.Click += h; return m; }
+
+            cm.Items.Add(MI("フォルダー", OnNewFolderClick));
+            cm.Items.Add(new Separator());
+            cm.Items.Add(MI("テキスト ドキュメント (.txt)", OnNewTextClick));
+            cm.Items.Add(MI("Markdown (.md)", OnNewMarkdownClick));
+            cm.Items.Add(MI("JSON (.json)", OnNewJsonClick));
+            cm.Items.Add(MI("CSV (.csv)", OnNewCsvClick));
+            cm.Items.Add(new Separator());
+            cm.Items.Add(MI("空の画像 (.png)", OnNewPngClick));
+            cm.Items.Add(MI("Bitmap 画像 (.bmp)", OnNewBmpClick));
+            cm.Items.Add(new Separator());
+            cm.Items.Add(MI("圧縮 (zip) フォルダー", OnNewZipClick));
+            cm.Items.Add(new Separator());
+            cm.Items.Add(MI("既存ファイルをコピーして追加...", OnImportFilesClick));
+
+            cm.PlacementTarget = fe;
+            cm.IsOpen = true;
         }
 
-        private async void OnImportFilesClick(object sender, RoutedEventArgs e)
+        private async void OnImportFilesClick(object? sender, RoutedEventArgs e)
         {
             var dir = GetTargetDirectory();
             if (dir == null) return;
@@ -489,7 +572,7 @@ namespace Explore
             }
         }
 
-        private async void OnNewFolderClick(object sender, RoutedEventArgs e)
+        private async void OnNewFolderClick(object? sender, RoutedEventArgs e)
         {
             var dir = GetTargetDirectory();
             if (dir == null) return;
@@ -502,35 +585,34 @@ namespace Explore
             await RefreshCurrentFolderViewAsync();
         }
 
-        private async void OnNewTextClick(object sender, RoutedEventArgs e)
+        private async void OnNewTextClick(object? sender, RoutedEventArgs e)
             => await CreateTextLikeAsync("新しいテキスト ドキュメント.txt", "");
 
-        private async void OnNewMarkdownClick(object sender, RoutedEventArgs e)
+        private async void OnNewMarkdownClick(object? sender, RoutedEventArgs e)
             => await CreateTextLikeAsync("新しいMarkdown.md", "# タイトル\n");
 
-        private async void OnNewJsonClick(object sender, RoutedEventArgs e)
+        private async void OnNewJsonClick(object? sender, RoutedEventArgs e)
             => await CreateTextLikeAsync("新しいJSON.json", "{\n}\n");
 
-        private async void OnNewCsvClick(object sender, RoutedEventArgs e)
+        private async void OnNewCsvClick(object? sender, RoutedEventArgs e)
             => await CreateTextLikeAsync("新しいCSV.csv", "header1,header2\n");
 
-        private async void OnNewZipClick(object sender, RoutedEventArgs e)
+        private async void OnNewZipClick(object? sender, RoutedEventArgs e)
         {
             var dir = GetTargetDirectory();
             if (dir == null) return;
             var path = GetUniquePath(dir, "新しい圧縮.zip");
             try
             {
-                using var zip = System.IO.Compression.ZipFile.Open(
-                    path, System.IO.Compression.ZipArchiveMode.Create);
+                using var zip = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Create);
             }
             catch { }
             await RefreshCurrentFolderViewAsync();
         }
 
-        private async void OnNewPngClick(object sender, RoutedEventArgs e)
+        private async void OnNewPngClick(object? sender, RoutedEventArgs e)
             => await CreateImageAsync("新しい画像.png", "png");
-        private async void OnNewBmpClick(object sender, RoutedEventArgs e)
+        private async void OnNewBmpClick(object? sender, RoutedEventArgs e)
             => await CreateImageAsync("新しい画像.bmp", "bmp");
 
         private async Task CreateTextLikeAsync(string defaultName, string initialContent)
@@ -538,11 +620,7 @@ namespace Explore
             var dir = GetTargetDirectory();
             if (dir == null) return;
             var path = GetUniquePath(dir, defaultName);
-            try
-            {
-                await File.WriteAllTextAsync(path, initialContent, System.Text.Encoding.UTF8);
-            }
-            catch { }
+            try { await File.WriteAllTextAsync(path, initialContent, System.Text.Encoding.UTF8); } catch { }
             await RefreshCurrentFolderViewAsync();
         }
 
@@ -555,10 +633,8 @@ namespace Explore
             {
                 using var bmp = new System.Drawing.Bitmap(800, 600, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
                 using (var g = System.Drawing.Graphics.FromImage(bmp)) g.Clear(System.Drawing.Color.White);
-                if (kind == "png")
-                    bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-                else
-                    bmp.Save(path, System.Drawing.Imaging.ImageFormat.Bmp);
+                if (kind == "png") bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                else bmp.Save(path, System.Drawing.Imaging.ImageFormat.Bmp);
             }
             catch { }
             await RefreshCurrentFolderViewAsync();
@@ -587,8 +663,7 @@ namespace Explore
             while (true)
             {
                 var candidate = Path.Combine(dir, $"{name} ({i}){ext}");
-                if (!File.Exists(candidate) && !Directory.Exists(candidate))
-                    return candidate;
+                if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
                 i++;
             }
         }

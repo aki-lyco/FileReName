@@ -3,21 +3,16 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             xmlns:local="clr-namespace:Explore"
              xmlns:fs="clr-namespace:Explore.FileSystem"
              xmlns:conv="clr-namespace:FileReName.Converters"
              mc:Ignorable="d"
              d:DesignWidth="1200" d:DesignHeight="700">
+
 	<UserControl.Resources>
-		<BooleanToVisibilityConverter x:Key="BoolToVis"/>
-
-		<!-- フォルダ階層テンプレート -->
-		<HierarchicalDataTemplate DataType="{x:Type fs:FolderNode}"
-								  ItemsSource="{Binding Children}">
-			<TextBlock Text="{Binding Name}"/>
+		<BooleanToVisibilityConverter x:Key="BoolToVis" />
+		<HierarchicalDataTemplate DataType="{x:Type fs:FolderNode}" ItemsSource="{Binding Children}">
+			<TextBlock Text="{Binding Name}" />
 		</HierarchicalDataTemplate>
-
-		<!-- 鮮度表示（外部コンバータ） -->
 		<conv:FreshStateToGlyphConverter x:Key="FreshGlyph"/>
 		<conv:FreshStateToBrushConverter x:Key="FreshBrush"/>
 		<conv:FreshStateToTipConverter   x:Key="FreshTip"/>
@@ -33,39 +28,37 @@
 			<ColumnDefinition Width="*"/>
 		</Grid.ColumnDefinitions>
 
-		<!-- 左ペイン：新規作成 -->
+		<!-- 左：新規作成（ContextMenuはコードで動的生成） -->
 		<StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Margin="8,8,8,6">
-			<Button x:Name="BtnNew" Content="新規作成" Padding="10,4" Click="OnNewButtonClick">
-				<Button.ContextMenu>
-					<ContextMenu>
-						<MenuItem Header="フォルダー" Click="OnNewFolderClick"/>
-						<Separator/>
-						<MenuItem Header="テキスト ドキュメント (.txt)" Click="OnNewTextClick"/>
-						<MenuItem Header="Markdown (.md)" Click="OnNewMarkdownClick"/>
-						<MenuItem Header="JSON (.json)" Click="OnNewJsonClick"/>
-						<MenuItem Header="CSV (.csv)" Click="OnNewCsvClick"/>
-						<Separator/>
-						<MenuItem Header="空の画像 (.png)" Click="OnNewPngClick"/>
-						<MenuItem Header="Bitmap 画像 (.bmp)" Click="OnNewBmpClick"/>
-						<Separator/>
-						<MenuItem Header="圧縮 (zip) フォルダー" Click="OnNewZipClick"/>
-						<Separator/>
-						<MenuItem Header="既存ファイルをコピーして追加..." Click="OnImportFilesClick"/>
-					</ContextMenu>
-				</Button.ContextMenu>
-			</Button>
+			<Button x:Name="BtnNewCreate" Content="新規作成" Padding="10,4"/>
 		</StackPanel>
 
-		<!-- 左ペイン：フォルダー ツリー -->
-		<TreeView Grid.Row="1" Grid.Column="0" Margin="8,0,8,8"
-				  ItemsSource="{Binding VM.Roots}"
-				  SelectedItemChanged="OnFolderSelected"
-				  TreeViewItem.Expanded="OnNodeExpanded"/>
+		<!-- 左：フォルダー ツリー（右クリックメニューは Tag で識別、Clickはコード側で一括ハンドル） -->
+		<TreeView x:Name="FolderTree"
+				  Grid.Row="1" Grid.Column="0" Margin="8,0,8,8"
+				  ItemsSource="{Binding VM.Roots}">
+			<TreeView.ItemContainerStyle>
+				<Style TargetType="TreeViewItem">
+					<Setter Property="ContextMenu">
+						<Setter.Value>
+							<ContextMenu>
+								<MenuItem Header="フォルダーをゴミ箱へ移動"
+										  Tag="DeleteFolder"
+										  CommandParameter="{Binding PlacementTarget.DataContext.FullPath,
+                                                     RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+							</ContextMenu>
+						</Setter.Value>
+					</Setter>
+				</Style>
+			</TreeView.ItemContainerStyle>
+		</TreeView>
 
-		<!-- 右ペイン：ツールバー／ステータス -->
+		<!-- 右：ツールバー -->
 		<StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="8,8,8,6">
-			<Button Content="このフォルダを同期" Click="OnIndexCurrentFolderClick" Padding="10,4"/>
-			<Button Content="差分のみIndex" Click="OnIndexOnlyUnindexedClick" Padding="10,4" Margin="8,0,0,0"/>
+			<Button x:Name="BtnIndex"     Content="このフォルダを同期" Padding="10,4"/>
+			<Button x:Name="BtnIndexDiff" Content="差分のみIndex"   Padding="10,4" Margin="8,0,0,0"/>
+			<Button x:Name="BtnRecycle"   Content="ゴミ箱へ移動"   Padding="10,4" Margin="8,0,0,0"
+					ToolTip="選択中のファイル、またはフォルダーをWindowsのごみ箱へ移動します"/>
 			<TextBlock Text="{Binding IndexStatusText}" Margin="16,4,0,0" VerticalAlignment="Center"/>
 			<TextBlock Text="{Binding IndexedCountText}" Margin="16,4,0,0" VerticalAlignment="Center"/>
 			<TextBlock Margin="16,4,0,0" VerticalAlignment="Center">
@@ -74,26 +67,23 @@
 			</TextBlock>
 		</StackPanel>
 
-		<!-- インデックス進捗バー -->
+		<!-- 右：進捗バー -->
 		<ProgressBar Grid.Row="0" Grid.ColumnSpan="2" Height="4" VerticalAlignment="Bottom" Margin="8,0,8,0"
 					 Maximum="100"
 					 Value="{Binding IndexPercent, Mode=OneWay}"
 					 Visibility="{Binding IsIndexing, Converter={StaticResource BoolToVis}}"/>
 
-		<!-- 右ペイン：ファイル一覧 -->
+		<!-- 右：ファイル一覧（ダブルクリック/Enterはコード側で紐付け） -->
 		<DataGrid x:Name="FilesGrid"
 				  Grid.Row="1" Grid.Column="1" Margin="8"
 				  AutoGenerateColumns="False" IsReadOnly="True"
 				  ItemsSource="{Binding Rows}"
-				  MouseDoubleClick="OnFilesGridDoubleClick"
-				  KeyDown="OnFilesGridKeyDown">
+				  SelectionMode="Extended">
 			<DataGrid.Columns>
 				<DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="*"/>
 				<DataGridTextColumn Header="拡張子" Binding="{Binding Extension}" Width="100"/>
 				<DataGridTextColumn Header="サイズ" Binding="{Binding Size, StringFormat={}{0:N0}}" Width="120"/>
 				<DataGridTextColumn Header="更新日時" Binding="{Binding LastWriteTime, StringFormat={}{0:yyyy-MM-dd HH:mm}}" Width="170"/>
-
-				<!-- 鮮度（絵文字＋色＋説明ツールチップ） -->
 				<DataGridTemplateColumn Header="鮮度" Width="70">
 					<DataGridTemplateColumn.CellTemplate>
 						<DataTemplate>
@@ -110,18 +100,20 @@
 				</DataGridTemplateColumn>
 			</DataGrid.Columns>
 
+			<!-- 行の右クリックメニュー：Tag で識別、Clickはコード側で一括ハンドル -->
 			<DataGrid.RowStyle>
 				<Style TargetType="DataGridRow">
 					<Setter Property="ContextMenu">
 						<Setter.Value>
 							<ContextMenu>
-								<!-- ★ 右クリックから「開く」 -->
-								<MenuItem Header="開く" Click="OnOpenFileClick" CommandParameter="{Binding FullPath}"/>
+								<MenuItem Header="開く"                       Tag="OpenFile"        CommandParameter="{Binding FullPath}"/>
 								<Separator/>
-								<MenuItem Header="このファイルを再Index" Click="OnReindexFileClick" CommandParameter="{Binding FullPath}"/>
-								<MenuItem Header="DBから削除（レコードのみ）" Click="OnDeleteFromDbClick" CommandParameter="{Binding FullPath}"/>
+								<MenuItem Header="ゴミ箱へ移動"               Tag="DeleteFile"      CommandParameter="{Binding FullPath}"/>
 								<Separator/>
-								<MenuItem Header="エクスプローラーで場所を開く" Click="OnOpenLocationClick" CommandParameter="{Binding FullPath}"/>
+								<MenuItem Header="このファイルを再Index"      Tag="ReindexFile"     CommandParameter="{Binding FullPath}"/>
+								<MenuItem Header="DBから削除（レコードのみ）" Tag="DeleteDbRecord"  CommandParameter="{Binding FullPath}"/>
+								<Separator/>
+								<MenuItem Header="エクスプローラーで場所を開く" Tag="OpenLocation"  CommandParameter="{Binding FullPath}"/>
 							</ContextMenu>
 						</Setter.Value>
 					</Setter>
