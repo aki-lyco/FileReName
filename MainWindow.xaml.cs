@@ -144,5 +144,22 @@ namespace Explore
                 vm.StatusText = text;
             }
         }
+
+        // ===== 追加：歯車ボタンのハンドラ =====
+        // いったん「構築」ビューに切り替える挙動にしています。
+        // 専用の設定ウィンドウが用意できたらここで開くように差し替えてください。
+        private void OpenSettings(object sender, RoutedEventArgs e)
+        {
+            if (!_ready)
+            {
+                System.Windows.MessageBox.Show(this, "画面初期化中です。", "設定", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (BuildToggle != null)
+                BuildToggle.IsChecked = true;
+
+            SwitchToBuild(sender, e);
+        }
     }
 }

@@ -7,20 +7,103 @@
         mc:Ignorable="d"
         Title="MainWindow" Height="760" Width="1280">
 
-	<!-- Ctrl+I to run AI status check -->
+	<!-- Ctrl+I で AI 状態確認 -->
 	<Window.InputBindings>
 		<KeyBinding Command="{x:Static local:MainWindow.CheckAICommand}"
 					Modifiers="Control" Key="I"/>
 	</Window.InputBindings>
 
+	<!-- ===== Styles ===== -->
+	<Window.Resources>
+
+		<!-- ピル型トグルボタン（角丸、オンで淡いブルー） -->
+		<Style x:Key="PillToggleStyle" TargetType="ToggleButton">
+			<Setter Property="Background" Value="White"/>
+			<Setter Property="BorderBrush" Value="#D7DCE6"/>
+			<Setter Property="BorderThickness" Value="1"/>
+			<Setter Property="Padding" Value="12,6"/>
+			<Setter Property="MinHeight" Value="32"/>
+			<Setter Property="FontSize" Value="14"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="ToggleButton">
+						<Border x:Name="Bd"
+								Background="{TemplateBinding Background}"
+								BorderBrush="{TemplateBinding BorderBrush}"
+								BorderThickness="{TemplateBinding BorderThickness}"
+								CornerRadius="12" Padding="{TemplateBinding Padding}">
+							<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="Bd" Property="BorderBrush" Value="#7AA7FF"/>
+							</Trigger>
+							<Trigger Property="IsPressed" Value="True">
+								<Setter TargetName="Bd" Property="Background" Value="#EEF4FF"/>
+								<Setter TargetName="Bd" Property="BorderBrush" Value="#377DFF"/>
+							</Trigger>
+							<Trigger Property="IsChecked" Value="True">
+								<Setter TargetName="Bd" Property="Background" Value="#EAF2FF"/>
+								<Setter TargetName="Bd" Property="BorderBrush" Value="#377DFF"/>
+							</Trigger>
+							<Trigger Property="IsEnabled" Value="False">
+								<Setter TargetName="Bd" Property="Opacity" Value="0.6"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+		<!-- 小さめのアイコンボタン（歯車など） -->
+		<Style x:Key="IconButtonStyle" TargetType="Button">
+			<Setter Property="Background" Value="White"/>
+			<Setter Property="BorderBrush" Value="#D7DCE6"/>
+			<Setter Property="BorderThickness" Value="1"/>
+			<Setter Property="Padding" Value="10,6"/>
+			<Setter Property="MinHeight" Value="32"/>
+			<Setter Property="MinWidth" Value="44"/>
+			<Setter Property="FontSize" Value="14"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="Button">
+						<Border x:Name="Bd"
+								Background="{TemplateBinding Background}"
+								BorderBrush="{TemplateBinding BorderBrush}"
+								BorderThickness="{TemplateBinding BorderThickness}"
+								CornerRadius="12" Padding="{TemplateBinding Padding}">
+							<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="Bd" Property="BorderBrush" Value="#7AA7FF"/>
+							</Trigger>
+							<Trigger Property="IsPressed" Value="True">
+								<Setter TargetName="Bd" Property="Background" Value="#EEF4FF"/>
+								<Setter TargetName="Bd" Property="BorderBrush" Value="#377DFF"/>
+							</Trigger>
+							<Trigger Property="IsEnabled" Value="False">
+								<Setter TargetName="Bd" Property="Opacity" Value="0.6"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+	</Window.Resources>
+
 	<Grid>
 		<Grid.RowDefinitions>
 			<RowDefinition Height="Auto"/>
+			<!-- Menu -->
 			<RowDefinition Height="Auto"/>
+			<!-- Top Bar -->
 			<RowDefinition Height="*"/>
+			<!-- Content -->
 		</Grid.RowDefinitions>
 
-		<!-- Menu -->
+		<!-- ===== Menu ===== -->
 		<Menu Grid.Row="0">
 			<MenuItem Header="_ファイル(F)"/>
 			<MenuItem Header="_編集(E)"/>
@@ -29,17 +112,63 @@
 			</MenuItem>
 		</Menu>
 
-		<!-- Top bar (view switches) -->
+		<!-- ===== Top Bar (右上のピル型ボタン群) ===== -->
 		<DockPanel Grid.Row="1" LastChildFill="True" Margin="8,6,8,6">
 			<StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-				<ToggleButton x:Name="FileToggle"   Content="ファイル"   Click="SwitchToFile"   MinWidth="80"  Padding="10,4" />
-				<ToggleButton x:Name="RenameToggle" Content="AIリネーム" Click="SwitchToRename" MinWidth="100" Padding="10,4" Margin="8,0,0,0"/>
-				<ToggleButton x:Name="BuildToggle"  Content="構築"       Click="SwitchToBuild"  MinWidth="80"  Padding="10,4" Margin="8,0,0,0"/>
-				<ToggleButton x:Name="ChatToggle"   Content="チャット"   Click="SwitchToChat"   MinWidth="80"  Padding="10,4" Margin="8,0,0,0"/>
+				<!-- ファイル -->
+				<ToggleButton x:Name="FileToggle" Style="{StaticResource PillToggleStyle}"
+							  Click="SwitchToFile" Margin="0,0,0,0" MinWidth="96">
+					<StackPanel Orientation="Horizontal">
+						<TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Margin="0,0,6,0"/>
+						<!-- Folder -->
+						<TextBlock Text="ファイル"/>
+					</StackPanel>
+				</ToggleButton>
+
+				<!-- AIリネーム -->
+				<ToggleButton x:Name="RenameToggle" Style="{StaticResource PillToggleStyle}"
+							  Click="SwitchToRename" Margin="8,0,0,0" MinWidth="110">
+					<StackPanel Orientation="Horizontal">
+						<Border Width="20" Height="20" CornerRadius="6"
+								Background="#F4F8FF" BorderBrush="#377DFF" BorderThickness="1"
+								Margin="0,0,6,0">
+							<TextBlock Text="AI" Foreground="#377DFF" FontWeight="Bold"
+									   FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+						</Border>
+						<TextBlock Text="AIリネーム"/>
+					</StackPanel>
+				</ToggleButton>
+
+				<!-- 構築 -->
+				<ToggleButton x:Name="BuildToggle" Style="{StaticResource PillToggleStyle}"
+							  Click="SwitchToBuild" Margin="8,0,0,0" MinWidth="80">
+					<StackPanel Orientation="Horizontal">
+						<TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE90F;" Margin="0,0,6,0"/>
+						<!-- Repair/Wrench -->
+						<TextBlock Text="構築"/>
+					</StackPanel>
+				</ToggleButton>
+
+				<!-- チャット -->
+				<ToggleButton x:Name="ChatToggle" Style="{StaticResource PillToggleStyle}"
+							  Click="SwitchToChat" Margin="8,0,0,0" MinWidth="86">
+					<StackPanel Orientation="Horizontal">
+						<TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8BD;" Margin="0,0,6,0"/>
+						<!-- Message -->
+						<TextBlock Text="チャット"/>
+					</StackPanel>
+				</ToggleButton>
+
+				<!-- 歯車（設定） -->
+				<Button x:Name="SettingsButton" Style="{StaticResource IconButtonStyle}"
+						Click="OpenSettings" Margin="8,0,0,0">
+					<TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;"/>
+					<!-- Settings -->
+				</Button>
 			</StackPanel>
 		</DockPanel>
 
-		<!-- Main content host -->
+		<!-- ===== Main Content Host ===== -->
 		<ContentControl x:Name="MainViewBox" Grid.Row="2" />
 	</Grid>
 </Window>

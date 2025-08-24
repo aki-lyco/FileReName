@@ -8,32 +8,30 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
-using System.Windows.Controls;      // TreeViewItem, MenuItem
-using Explore.FileSystem;           // ExplorerViewModel, FolderNode, DefaultFileSystemService
-using Explore.Indexing;             // IndexDatabase, DbFileRecord, FileKeyUtil, FreshnessService, FreshState
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Globalization;
+using Explore.FileSystem;
+using Explore.Indexing;
 using Microsoft.Data.Sqlite;
 using WpfMessageBox = System.Windows.MessageBox;
+//（必要なら）using Media = System.Windows.Media;
 
 namespace Explore
 {
     public partial class FilesControl : System.Windows.Controls.UserControl, INotifyPropertyChanged
     {
-        // 左ペインVM
         private readonly ExplorerViewModel _vm = new(new DefaultFileSystemService());
         public ExplorerViewModel VM => _vm;
 
-        // DB ＆ 鮮度
         private static readonly IndexDatabase _db = new();
         private static readonly FreshnessService _fresh = new(_db);
 
-        // トグル（今はUIが無いので false 固定）
         private bool _includeSubs = false;
 
-        // キャンセル
         private CancellationTokenSource? _indexCts;
         private CancellationTokenSource? _freshCts;
 
-        // 進捗
         private bool _isIndexing;
         public bool IsIndexing { get => _isIndexing; private set { _isIndexing = value; Raise(); } }
 
@@ -44,9 +42,8 @@ namespace Explore
         public string IndexStatusText { get => _indexStatusText; private set { _indexStatusText = value; Raise(); } }
 
         private string _indexedCountText = "";
-        public string IndexedCountText { get => _indexedCountText; private set { _indexedCountText = value; Raise(); } }
+        public string IndexedCountText { get => _indexedCountText; private set { _indexedCountText = value; } }
 
-        // 鮮度％
         private double _freshnessPercent;
         public double FreshnessPercent { get => _freshnessPercent; private set { _freshnessPercent = value; Raise(); } }
 
@@ -99,7 +96,6 @@ namespace Explore
 
             await _vm.NavigateToAsync(node.FullPath);
 
-            // FS→行を構築
             Rows.Clear();
             foreach (var f in _vm.Files)
             {
@@ -113,10 +109,12 @@ namespace Explore
                 });
             }
 
-            // 行鮮度→全体％
-            _fresh.InvalidateFreshnessCache(node.FullPath);
-            await RefreshRowsFreshnessAsync(node.FullPath);
-            _ = RecalcFreshnessPercentAsync(node.FullPath);
+            var root = _vm.CurrentPath;
+            if (string.IsNullOrWhiteSpace(root)) return;
+
+            _fresh.InvalidateFreshnessCache(root!);
+            await RefreshRowsFreshnessAsync(root!);
+            _ = RecalcFreshnessPercentAsync(root!);
         }
 
         // ===== ボタン：このフォルダを同期 =====
@@ -145,21 +143,17 @@ namespace Explore
                     IndexStatusText = $"登録中 {p.scanned:N0} 件（新規 {p.inserted:N0}）";
                 });
 
-                var records = EnumerateRecordsAsync(root, _includeSubs, _indexCts.Token);
+                var records = EnumerateRecordsAsync(root!, _includeSubs, _indexCts.Token);
 
                 var (scanned, inserted) = await _db.BulkUpsertAsync(
-                    records,
-                    batchSize: 500,
-                    progress: prog,
-                    ct: _indexCts.Token);
+                    records, batchSize: 500, progress: prog, ct: _indexCts.Token);
 
                 IndexedCountText = $"DB件数: {await GetTableCountAsync("files"):N0}";
                 IndexStatusText = "完了";
 
-                // 鮮度更新
-                _fresh.InvalidateFreshnessCache(root);
-                await RefreshRowsFreshnessAsync(root);
-                _ = RecalcFreshnessPercentAsync(root);
+                _fresh.InvalidateFreshnessCache(root!);
+                await RefreshRowsFreshnessAsync(root!);
+                _ = RecalcFreshnessPercentAsync(root!);
             }
             catch (OperationCanceledException)
             {
@@ -178,7 +172,7 @@ namespace Explore
             }
         }
 
-        // ===== ボタン：差分のみIndex（Unindexedだけ高速UPSERT） =====
+        // ===== ボタン：差分のみIndex =====
         private async void OnIndexOnlyUnindexedClick(object sender, RoutedEventArgs e)
         {
             try
@@ -196,14 +190,15 @@ namespace Explore
                         done++;
                         if ((uint)Environment.TickCount % 64 == 0) await Task.Yield();
                     }
-                    catch { /* 個別失敗は握りつぶす */ }
+                    catch { /* ignore */ }
                 }
 
-                _fresh.InvalidateFreshnessCache(root);
-                await RefreshRowsFreshnessAsync(root);
-                _ = RecalcFreshnessPercentAsync(root);
+                _fresh.InvalidateFreshnessCache(root!);
+                await RefreshRowsFreshnessAsync(root!);
+                _ = RecalcFreshnessPercentAsync(root!);
 
-                WpfMessageBox.Show($"差分Index 完了：{done} 件", "差分のみIndex", MessageBoxButton.OK, MessageBoxImage.Information);
+                WpfMessageBox.Show($"差分Index 完了：{done} 件", "差分のみIndex",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
@@ -220,9 +215,16 @@ namespace Explore
             try
             {
                 await _db.UpsertFileFromFsAsync(path!, CancellationToken.None);
-                _fresh.InvalidateFreshnessCache(Path.GetDirectoryName(path!) ?? "");
-                await RefreshRowsFreshnessAsync(_vm.CurrentPath);
-                _ = RecalcFreshnessPercentAsync(_vm.CurrentPath);
+
+                var current = _vm?.CurrentPath ?? string.Empty;
+                var dir = Path.GetDirectoryName(path!) ?? string.Empty;
+                _fresh.InvalidateFreshnessCache(!string.IsNullOrWhiteSpace(dir) ? dir : current);
+
+                if (!string.IsNullOrWhiteSpace(current))
+                {
+                    await RefreshRowsFreshnessAsync(current);
+                    _ = RecalcFreshnessPercentAsync(current);
+                }
             }
             catch (Exception ex)
             {
@@ -238,9 +240,16 @@ namespace Explore
             try
             {
                 await _db.DeleteByPathAsync(path!, CancellationToken.None);
-                _fresh.InvalidateFreshnessCache(Path.GetDirectoryName(path!) ?? "");
-                await RefreshRowsFreshnessAsync(_vm.CurrentPath);
-                _ = RecalcFreshnessPercentAsync(_vm.CurrentPath);
+
+                var current = _vm?.CurrentPath ?? string.Empty;
+                var dir = Path.GetDirectoryName(path!) ?? string.Empty;
+                _fresh.InvalidateFreshnessCache(!string.IsNullOrWhiteSpace(dir) ? dir : current);
+
+                if (!string.IsNullOrWhiteSpace(current))
+                {
+                    await RefreshRowsFreshnessAsync(current);
+                    _ = RecalcFreshnessPercentAsync(current);
+                }
             }
             catch (Exception ex)
             {
@@ -307,7 +316,7 @@ namespace Explore
                         IndexedAt = 0
                     };
                 }
-                catch { /* 個別失敗はスキップ */ }
+                catch { }
 
                 if (rec != null) yield return rec;
                 if ((uint)Environment.TickCount % 2048 == 0)
@@ -317,14 +326,14 @@ namespace Explore
 
         private async Task<long> GetTableCountAsync(string table)
         {
-            using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = IndexDatabase.DatabasePath }.ToString());
+            using var conn = new Microsoft.Data.Sqlite.SqliteConnection(
+                new SqliteConnectionStringBuilder { DataSource = IndexDatabase.DatabasePath }.ToString());
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
             return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
         }
 
-        // ===== 鮮度更新 =====
         private async Task RefreshRowsFreshnessAsync(string scopePath)
         {
             _freshCts?.Cancel();
@@ -351,5 +360,176 @@ namespace Explore
             }
             catch { /* ignore */ }
         }
+
+        // ==== 一覧再読込 ====
+        private async Task RefreshCurrentFolderViewAsync()
+        {
+            var root = _vm?.CurrentPath;
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return;
+
+            await _vm.NavigateToAsync(root!);
+
+            Rows.Clear();
+            foreach (var f in _vm.Files)
+            {
+                Rows.Add(new FileRow
+                {
+                    FullPath = f.FullPath,
+                    Name = f.Name,
+                    Extension = f.Extension,
+                    Size = f.Size,
+                    LastWriteTime = f.LastWriteTime
+                });
+            }
+
+            _fresh.InvalidateFreshnessCache(root!);
+            await RefreshRowsFreshnessAsync(root!);
+            _ = RecalcFreshnessPercentAsync(root!);
+        }
+
+        #region NewFileCreate
+        private void OnNewButtonClick(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement fe && fe.ContextMenu != null)
+            {
+                fe.ContextMenu.PlacementTarget = fe;
+                fe.ContextMenu.IsOpen = true;
+            }
+        }
+
+        private async void OnImportFilesClick(object sender, RoutedEventArgs e)
+        {
+            var dir = GetTargetDirectory();
+            if (dir == null) return;
+
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "追加するファイルを選択",
+                Multiselect = true,
+                CheckFileExists = true
+            };
+            if (dlg.ShowDialog() == true)
+            {
+                int ok = 0, fail = 0;
+                foreach (var src in dlg.FileNames)
+                {
+                    try
+                    {
+                        var name = Path.GetFileName(src);
+                        var dst = GetUniquePath(dir, name);
+                        File.Copy(src, dst);
+                        ok++;
+                    }
+                    catch { fail++; }
+                }
+                await RefreshCurrentFolderViewAsync();
+                IndexedCountText = $"追加: {ok}, 失敗: {fail}";
+            }
+        }
+
+        private async void OnNewFolderClick(object sender, RoutedEventArgs e)
+        {
+            var dir = GetTargetDirectory();
+            if (dir == null) return;
+            var baseName = "新しいフォルダー";
+            var name = baseName;
+            int i = 2;
+            while (Directory.Exists(Path.Combine(dir, name)))
+                name = $"{baseName} ({i++})";
+            Directory.CreateDirectory(Path.Combine(dir, name));
+            await RefreshCurrentFolderViewAsync();
+        }
+
+        private async void OnNewTextClick(object sender, RoutedEventArgs e)
+            => await CreateTextLikeAsync("新しいテキスト ドキュメント.txt", "");
+
+        private async void OnNewMarkdownClick(object sender, RoutedEventArgs e)
+            => await CreateTextLikeAsync("新しいMarkdown.md", "# タイトル\n");
+
+        private async void OnNewJsonClick(object sender, RoutedEventArgs e)
+            => await CreateTextLikeAsync("新しいJSON.json", "{\n}\n");
+
+        private async void OnNewCsvClick(object sender, RoutedEventArgs e)
+            => await CreateTextLikeAsync("新しいCSV.csv", "header1,header2\n");
+
+        private async void OnNewZipClick(object sender, RoutedEventArgs e)
+        {
+            var dir = GetTargetDirectory();
+            if (dir == null) return;
+            var path = GetUniquePath(dir, "新しい圧縮.zip");
+            try
+            {
+                using var zip = System.IO.Compression.ZipFile.Open(
+                    path, System.IO.Compression.ZipArchiveMode.Create);
+            }
+            catch { }
+            await RefreshCurrentFolderViewAsync();
+        }
+
+        private async void OnNewPngClick(object sender, RoutedEventArgs e)
+            => await CreateImageAsync("新しい画像.png", "png");
+        private async void OnNewBmpClick(object sender, RoutedEventArgs e)
+            => await CreateImageAsync("新しい画像.bmp", "bmp");
+
+        private async Task CreateTextLikeAsync(string defaultName, string initialContent)
+        {
+            var dir = GetTargetDirectory();
+            if (dir == null) return;
+            var path = GetUniquePath(dir, defaultName);
+            try
+            {
+                await File.WriteAllTextAsync(path, initialContent, System.Text.Encoding.UTF8);
+            }
+            catch { }
+            await RefreshCurrentFolderViewAsync();
+        }
+
+        private async Task CreateImageAsync(string defaultName, string kind)
+        {
+            var dir = GetTargetDirectory();
+            if (dir == null) return;
+            var path = GetUniquePath(dir, defaultName);
+            try
+            {
+                using var bmp = new System.Drawing.Bitmap(800, 600, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                using (var g = System.Drawing.Graphics.FromImage(bmp)) g.Clear(System.Drawing.Color.White);
+                if (kind == "png")
+                    bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                else
+                    bmp.Save(path, System.Drawing.Imaging.ImageFormat.Bmp);
+            }
+            catch { }
+            await RefreshCurrentFolderViewAsync();
+        }
+
+        private string? GetTargetDirectory()
+        {
+            var dir = _vm?.CurrentPath;
+            if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir))
+            {
+                WpfMessageBox.Show("左のツリーでフォルダーを選んでください。", "新規作成",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return null;
+            }
+            return dir;
+        }
+
+        private static string GetUniquePath(string dir, string fileName)
+        {
+            var path = Path.Combine(dir, fileName);
+            if (!File.Exists(path) && !Directory.Exists(path)) return path;
+
+            var name = Path.GetFileNameWithoutExtension(fileName);
+            var ext = Path.GetExtension(fileName);
+            int i = 2;
+            while (true)
+            {
+                var candidate = Path.Combine(dir, $"{name} ({i}){ext}");
+                if (!File.Exists(candidate) && !Directory.Exists(candidate))
+                    return candidate;
+                i++;
+            }
+        }
+        #endregion
     }
 }
