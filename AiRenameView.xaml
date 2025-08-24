@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl x:Class="Explore.AiRenameView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DesignWidth="900" d:DesignHeight="600">
+    <Grid Background="#FFF9F9F9" AllowDrop="True" Drop="OnDrop" DragOver="OnDragOver">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="TxtHeader" Grid.Row="0"
+               Text="" FontSize="18" FontWeight="Bold"
+               Margin="16,12,16,0"/>
+
+        <StackPanel Orientation="Horizontal" Margin="16,8,16,8" Grid.Row="0" HorizontalAlignment="Left">
+            <Button x:Name="BtnAdd"       Click="OnAddFiles"  Margin="0,0,8,0"/>
+            <Button x:Name="BtnSuggest"   Click="OnSuggest"   Margin="0,0,8,0"/>
+            <Button x:Name="BtnSelectAll" Click="OnSelectAll" Margin="0,0,8,0"/>
+            <Button x:Name="BtnApply"     Click="OnApply"     Margin="0,0,8,0"/>
+            <Button x:Name="BtnCheckAI"   Click="OnCheckAI"   Margin="8,0,0,0"/>
+            <TextBlock Text="{Binding StatusText}" Margin="16,3,0,0" Foreground="Gray"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="16">
+            <DataGrid x:Name="Grid"
+                ItemsSource="{Binding Items}"
+                AutoGenerateColumns="False"
+                CanUserAddRows="False"
+                HeadersVisibility="Column"
+                IsReadOnly="False"
+                AlternatingRowBackground="#FFEFF6FF"
+                AlternationCount="2">
+                <DataGrid.Columns>
+                    <DataGridCheckBoxColumn x:Name="ColApply"     Width="60"
+                                   Binding="{Binding Apply, Mode=TwoWay}"/>
+                    <DataGridTextColumn     x:Name="ColOriginal"  Width="*"
+                                   Binding="{Binding OriginalName}" IsReadOnly="True"/>
+                    <DataGridTextColumn     x:Name="ColSuggested" Width="*"
+                                   Binding="{Binding SuggestedName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                    <DataGridTextColumn     x:Name="ColPreview"   Width="2*"
+                                   Binding="{Binding PreviewFullPath}" IsReadOnly="True"/>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <TextBlock x:Name="TxtHint"
+                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                 FontSize="16" Foreground="Gray" Text="">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Items.Count}" Value="0">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </Grid>
+    </Grid>
+</UserControl>

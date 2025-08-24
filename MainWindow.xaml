@@ -5,117 +5,41 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Explore"
         mc:Ignorable="d"
-        Title="MainWindow" MinWidth="200">
+        Title="MainWindow" Height="760" Width="1280">
 
-    <Grid>
-        <DockPanel>
-            <Menu DockPanel.Dock="Top">
-                <MenuItem Header="ファイル(F)">
-                    <MenuItem Header="新規作成(N)" />
-                    <MenuItem Header="開く(O)" />
-                    <MenuItem Header="終了(X)"/>
-                </MenuItem>
-                <MenuItem Header="編集(E)" />
-                <MenuItem Header="表示(V)" />
-            </Menu>
+	<!-- Ctrl+I to run AI status check -->
+	<Window.InputBindings>
+		<KeyBinding Command="{x:Static local:MainWindow.CheckAICommand}"
+					Modifiers="Control" Key="I"/>
+	</Window.InputBindings>
 
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="34"/>
-                    <RowDefinition Height="1*"/>
-                </Grid.RowDefinitions>
+	<Grid>
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="*"/>
+		</Grid.RowDefinitions>
 
-                <StackPanel Orientation="Horizontal" FlowDirection="RightToLeft"
-                            Grid.Row="0">
-                    <Button Style="{StaticResource SettingsIconButton}" Content="&#xE713;" FontSize="20"
-                            Margin="5,0,5,0" Width="28" Height="28" Click="OpenSettings"/>
-                    
-                    <ToggleButton x:Name="ChatToggle" Checked="SwitchToChat"
-                                  Margin="5,3,0,3" Width="85" >
-                        <TextBlock>
-                            <Run Text="&#xE8F2;" FontFamily="Segoe Fluent Icons" BaselineAlignment="Center" FontSize="16"/>
-                            <Run Text=" チャット"/>
-                        </TextBlock>
-                        <ToggleButton.Template>
-                            <ControlTemplate TargetType="ToggleButton">
-                                <Border x:Name="border"
-                                        CornerRadius="10,0,0,10" 
-                                        Background="White"
-                                        BorderBrush="Gray" BorderThickness="1">
-                                    <ContentPresenter HorizontalAlignment="Center"
-                                                        VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsChecked" Value="True">
-                                        <Setter TargetName="border" Property="Background" Value="{DynamicResource ThemeBrush}"/>
-                                        <Setter Property="Foreground" Value="White"/>
-                                    </Trigger>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="border" Property="Background" Value="#AAACD8FF"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </ToggleButton.Template>
-                    </ToggleButton>
+		<!-- Menu -->
+		<Menu Grid.Row="0">
+			<MenuItem Header="_ファイル(F)"/>
+			<MenuItem Header="_編集(E)"/>
+			<MenuItem Header="_表示(V)">
+				<MenuItem Header="AI状態確認" Click="Menu_CheckAI_Click" InputGestureText="Ctrl+I"/>
+			</MenuItem>
+		</Menu>
 
-                    <ToggleButton x:Name="BuildToggle" Checked="SwitchToBuild"
-                                  Margin="0,3,0,3" Width="80" >
-                        <TextBlock>
-                            <Run Text="&#xE98F;" FontFamily="Segoe Fluent Icons" BaselineAlignment="Center" FontSize="16"/>
-                            <Run Text=" 構築"/>
-                        </TextBlock>
-                        <ToggleButton.Template>
-                            <ControlTemplate TargetType="ToggleButton">
-                                <Border x:Name="border"
-                                        Background="White"
-                                        BorderBrush="Gray" BorderThickness="1">
-                                    <ContentPresenter HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsChecked" Value="True">
-                                        <Setter TargetName="border" Property="Background" Value="{DynamicResource ThemeBrush}"/>
-                                        <Setter Property="Foreground" Value="White"/>
-                                    </Trigger>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="border" Property="Background" Value="#AAACD8FF"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </ToggleButton.Template>
-                    </ToggleButton>
+		<!-- Top bar (view switches) -->
+		<DockPanel Grid.Row="1" LastChildFill="True" Margin="8,6,8,6">
+			<StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+				<ToggleButton x:Name="FileToggle"   Content="ファイル"   Click="SwitchToFile"   MinWidth="80"  Padding="10,4" />
+				<ToggleButton x:Name="RenameToggle" Content="AIリネーム" Click="SwitchToRename" MinWidth="100" Padding="10,4" Margin="8,0,0,0"/>
+				<ToggleButton x:Name="BuildToggle"  Content="構築"       Click="SwitchToBuild"  MinWidth="80"  Padding="10,4" Margin="8,0,0,0"/>
+				<ToggleButton x:Name="ChatToggle"   Content="チャット"   Click="SwitchToChat"   MinWidth="80"  Padding="10,4" Margin="8,0,0,0"/>
+			</StackPanel>
+		</DockPanel>
 
-                    <ToggleButton x:Name="FileToggle" Checked="SwitchToFile"
-                                  Margin="0,3,0,3" Width="85"
-                                  IsEnabled="False" IsChecked="True" >
-                        <TextBlock>
-                            <Run Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" BaselineAlignment="Center" FontSize="16"/>
-                            <Run Text=" ファイル"/>
-                        </TextBlock>
-                        <ToggleButton.Template>
-                            <ControlTemplate TargetType="ToggleButton">
-                                <Border x:Name="border"
-                                        CornerRadius="0,10,10,0" 
-                                        Background="White"
-                                        BorderBrush="Gray" BorderThickness="1">
-                                    <ContentPresenter HorizontalAlignment="Center"
-                                                        VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsChecked" Value="True">
-                                        <Setter TargetName="border" Property="Background" Value="{DynamicResource ThemeBrush}"/>
-                                        <Setter Property="Foreground" Value="White"/>
-                                    </Trigger>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="border" Property="Background" Value="#AAACD8FF"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </ToggleButton.Template>
-                    </ToggleButton>
-                </StackPanel>
-                <ContentControl x:Name="MainViewBox" Grid.Row="1"/>
-            </Grid>
-        </DockPanel>
-    </Grid>
+		<!-- Main content host -->
+		<ContentControl x:Name="MainViewBox" Grid.Row="2" />
+	</Grid>
 </Window>
