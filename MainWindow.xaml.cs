@@ -145,9 +145,7 @@ namespace Explore
             }
         }
 
-        // ===== 追加：歯車ボタンのハンドラ =====
-        // いったん「構築」ビューに切り替える挙動にしています。
-        // 専用の設定ウィンドウが用意できたらここで開くように差し替えてください。
+        // ===== 歯車ボタン：設定ウィンドウを開く（修正済み） =====
         private void OpenSettings(object sender, RoutedEventArgs e)
         {
             if (!_ready)
@@ -156,10 +154,21 @@ namespace Explore
                 return;
             }
 
-            if (BuildToggle != null)
-                BuildToggle.IsChecked = true;
-
-            SwitchToBuild(sender, e);
+            try
+            {
+                var win = new SettingsWindow
+                {
+                    Owner = this,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    ShowInTaskbar = false
+                };
+                win.ShowDialog(); // モーダル表示
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(this, ex.Message, "設定ウィンドウの起動に失敗しました",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
     }
 }
