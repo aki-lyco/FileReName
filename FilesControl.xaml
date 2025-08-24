@@ -17,7 +17,7 @@
 			<TextBlock Text="{Binding Name}"/>
 		</HierarchicalDataTemplate>
 
-		<!-- ★ 外部コンバータ（絵文字/色/ツールチップ） -->
+		<!-- 鮮度表示（外部コンバータ） -->
 		<conv:FreshStateToGlyphConverter x:Key="FreshGlyph"/>
 		<conv:FreshStateToBrushConverter x:Key="FreshBrush"/>
 		<conv:FreshStateToTipConverter   x:Key="FreshTip"/>
@@ -81,15 +81,19 @@
 					 Visibility="{Binding IsIndexing, Converter={StaticResource BoolToVis}}"/>
 
 		<!-- 右ペイン：ファイル一覧 -->
-		<DataGrid Grid.Row="1" Grid.Column="1" Margin="8" AutoGenerateColumns="False" IsReadOnly="True"
-				  ItemsSource="{Binding Rows}">
+		<DataGrid x:Name="FilesGrid"
+				  Grid.Row="1" Grid.Column="1" Margin="8"
+				  AutoGenerateColumns="False" IsReadOnly="True"
+				  ItemsSource="{Binding Rows}"
+				  MouseDoubleClick="OnFilesGridDoubleClick"
+				  KeyDown="OnFilesGridKeyDown">
 			<DataGrid.Columns>
 				<DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="*"/>
 				<DataGridTextColumn Header="拡張子" Binding="{Binding Extension}" Width="100"/>
 				<DataGridTextColumn Header="サイズ" Binding="{Binding Size, StringFormat={}{0:N0}}" Width="120"/>
 				<DataGridTextColumn Header="更新日時" Binding="{Binding LastWriteTime, StringFormat={}{0:yyyy-MM-dd HH:mm}}" Width="170"/>
 
-				<!-- ★ 鮮度（絵文字＋色＋説明ツールチップ） -->
+				<!-- 鮮度（絵文字＋色＋説明ツールチップ） -->
 				<DataGridTemplateColumn Header="鮮度" Width="70">
 					<DataGridTemplateColumn.CellTemplate>
 						<DataTemplate>
@@ -111,6 +115,9 @@
 					<Setter Property="ContextMenu">
 						<Setter.Value>
 							<ContextMenu>
+								<!-- ★ 右クリックから「開く」 -->
+								<MenuItem Header="開く" Click="OnOpenFileClick" CommandParameter="{Binding FullPath}"/>
+								<Separator/>
 								<MenuItem Header="このファイルを再Index" Click="OnReindexFileClick" CommandParameter="{Binding FullPath}"/>
 								<MenuItem Header="DBから削除（レコードのみ）" Click="OnDeleteFromDbClick" CommandParameter="{Binding FullPath}"/>
 								<Separator/>

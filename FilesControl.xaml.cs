@@ -11,11 +11,13 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Globalization;
+using System.Windows.Media;
 using Explore.FileSystem;
 using Explore.Indexing;
 using Microsoft.Data.Sqlite;
 using WpfMessageBox = System.Windows.MessageBox;
-//（必要なら）using Media = System.Windows.Media;
+// ★ WPF 入力系をエイリアスで明示（KeyEventArgs の曖昧参照を解消）
+using Input = System.Windows.Input;
 
 namespace Explore
 {
@@ -270,6 +272,66 @@ namespace Explore
             catch (Exception ex)
             {
                 WpfMessageBox.Show(ex.Message, "Open Location Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // ===== 追加：開く（ダブルクリック／Enter／右クリック） =====
+        private void OnFilesGridDoubleClick(object sender, Input.MouseButtonEventArgs e)
+        {
+            // ヘッダや空白のダブルクリックは無視
+            var dep = (DependencyObject)e.OriginalSource;
+            while (dep != null && dep is not DataGridRow && dep is not DataGridCell && dep is not DataGrid)
+                dep = VisualTreeHelper.GetParent(dep);
+
+            if (dep is DataGridRow row && row.Item is FileRow fr)
+            {
+                OpenFile(fr.FullPath);
+                e.Handled = true;
+                return;
+            }
+
+            if (FilesGrid?.SelectedItem is FileRow sel)
+            {
+                OpenFile(sel.FullPath);
+                e.Handled = true;
+            }
+        }
+
+        private void OnFilesGridKeyDown(object sender, Input.KeyEventArgs e) // ★ ここを WPF に固定
+        {
+            if (e.Key == Input.Key.Enter && FilesGrid?.SelectedItem is FileRow fr)
+            {
+                OpenFile(fr.FullPath);
+                e.Handled = true;
+            }
+        }
+
+        private void OnOpenFileClick(object sender, RoutedEventArgs e)
+        {
+            var path = (sender as MenuItem)?.CommandParameter as string ?? GetPathFromContext(sender);
+            if (string.IsNullOrWhiteSpace(path)) return;
+            OpenFile(path!);
+        }
+
+        private void OpenFile(string path)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    WpfMessageBox.Show($"ファイルが存在しません。\n{path}", "開く", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                var psi = new System.Diagnostics.ProcessStartInfo(path)
+                {
+                    UseShellExecute = true,
+                    Verb = "open"
+                };
+                System.Diagnostics.Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(ex.Message, "開くエラー", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
