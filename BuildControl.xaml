@@ -45,10 +45,6 @@
 				<Button Style="{StaticResource ToolbarButton}" Content="保存先フォルダを選択" Command="{Binding PickBasePath}"/>
 				<Button Style="{StaticResource ToolbarButton}" Content="自動取り込み" Command="{Binding AutoImportFromBase}"/>
 				<Separator/>
-				<Button Style="{StaticResource ToolbarButton}" Content="保存" Command="{Binding SaveCategories}"/>
-				<Button Style="{StaticResource ToolbarButton}" Content="取り消し" Command="{Binding LoadCategories}"/>
-				<Button Style="{StaticResource ToolbarButton}" Content="インポートJSON" Command="{Binding LoadCategories}"/>
-				<Button Style="{StaticResource ToolbarButton}" Content="エクスポートJSON" Command="{Binding ExportCategories}"/>
 				<Button Style="{StaticResource ToolbarButton}" Content="検証" Command="{Binding ValidateCategories}"/>
 			</ToolBar>
 		</ToolBarTray>

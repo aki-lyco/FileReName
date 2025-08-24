@@ -40,6 +40,7 @@ namespace Explore.Search
             public long CtimeUnix { get; init; }
             public string Summary { get; init; } = "";
             public string Snippet { get; init; } = "";
+            public string Tags { get; init; } = "";
             public double BaseScore { get; init; }
             public int TermScore { get; init; }
             public int Stage1Score { get; init; }   // must/ext/date/path の加点合計
@@ -63,7 +64,7 @@ namespace Explore.Search
         private readonly Func<string, CancellationToken, Task<string?>>? _normalizeAsync;
         private readonly string _dbPath;
 
-        private bool _hasExt, _hasSize, _hasMtime, _hasCtime, _hasSummary, _hasSnippet;
+        private bool _hasExt, _hasSize, _hasMtime, _hasCtime, _hasSummary, _hasSnippet, _hasTags;
         private string _idCol = "rowid";
 
         public Action<string>? DebugLog { get; set; }
@@ -105,8 +106,9 @@ namespace Explore.Search
             _hasCtime = HasColumn(con, "files", "ctime_unix");
             _hasSummary = HasColumn(con, "files", "summary");
             _hasSnippet = HasColumn(con, "files", "snippet");
+            _hasTags = HasColumn(con, "files", "tags");
             _idCol = "rowid";
-            Debug($"schema: ext={_hasExt}, size={_hasSize}, mtime={_hasMtime}, ctime={_hasCtime}, summary={_hasSummary}, snippet={_hasSnippet}, idcol={_idCol}");
+            Debug($"schema: ext={_hasExt}, size={_hasSize}, mtime={_hasMtime}, ctime={_hasCtime}, summary={_hasSummary}, snippet={_hasSnippet}, tags={_hasTags}, idcol={_idCol}");
         }
 
         private static bool HasColumn(SqliteConnection con, string table, string col)
@@ -210,7 +212,7 @@ COMMIT;";
             var hits2 = await TermScoreTop20Async(con, nq, hits1, ct);
             Debug($"[stage2] top20 by term_score + carry s1 = {hits2.Count}");
 
-            // 3) final：summary/snippet を加点、Stage1+Term+SS の合計で上位5件
+            // 3) final：summary/snippet/tags（存在する場合のみ） の出現回数を加点し、合計スコア上位5件
             var final5 = FinalTop5ByScoring(nq, hits2);
             Debug($"[final-scored] selected = {final5.Count}");
 
@@ -397,6 +399,7 @@ SELECT rowid, base_score, snippet FROM seed;";
             string selCtime = _hasCtime ? "COALESCE(f.ctime_unix,0) AS ctime_unix" : "0 AS ctime_unix";
             string selSummary = _hasSummary ? "COALESCE(f.summary,'') AS summary" : "'' AS summary";
             string selSnippet = _hasSnippet ? "COALESCE(f.snippet,'') AS snippet" : "'' AS snippet";
+            string selTags = _hasTags ? "COALESCE(f.tags,'') AS tags" : "'' AS tags";
             string selExt = _hasExt ? "COALESCE(f.ext,'') AS ext" : "'' AS ext";
 
             var values = string.Join(",", seed.Select(s => $"({s.rowid},{s.baseScore.ToString(CultureInfo.InvariantCulture)})"));
@@ -407,7 +410,7 @@ hits AS (
   SELECT f.{_idCol} AS rowid,
          f.name, {selExt}, f.path,
          {selSize}, {selMtime}, {selCtime},
-         {selSummary}, {selSnippet},
+         {selSummary}, {selSnippet}, {selTags},
          s.base_score AS base_score,
          ({s1}) AS stage1_score
     FROM seed s
@@ -435,8 +438,9 @@ SELECT * FROM hits;";
                     CtimeUnix = r.GetInt64(6),
                     Summary = r.GetString(7),
                     Snippet = r.GetString(8),
-                    BaseScore = r.GetDouble(9),
-                    Stage1Score = r.GetInt32(10),
+                    Tags = r.GetString(9),
+                    BaseScore = r.GetDouble(10),
+                    Stage1Score = r.GetInt32(11),
                     TermScore = 0
                 });
             }
@@ -449,16 +453,26 @@ SELECT * FROM hits;";
         {
             if (hits1.Count == 0) return new();
 
+            // ★ 重みを上げる：terms = +2 / must = +3
             var sbScore = new StringBuilder();
-            if (q.Terms.Count == 0) sbScore.Append("0");
-            else
+            bool any = false;
+            if (q.Terms.Count > 0)
             {
                 for (int i = 0; i < q.Terms.Count; i++)
                 {
-                    if (i > 0) sbScore.Append(" + ");
-                    sbScore.Append($"(CASE WHEN (LOWER(f.name) LIKE $t{i} OR LOWER(f.path) LIKE $t{i}) THEN 1 ELSE 0 END)");
+                    if (any) sbScore.Append(" + "); any = true;
+                    sbScore.Append($"(CASE WHEN (LOWER(f.name) LIKE $t{i} OR LOWER(f.path) LIKE $t{i}) THEN 2 ELSE 0 END)");
                 }
             }
+            if (q.Must.Count > 0)
+            {
+                for (int i = 0; i < q.Must.Count; i++)
+                {
+                    if (any) sbScore.Append(" + "); any = true;
+                    sbScore.Append($"(CASE WHEN (LOWER(f.name) LIKE $mu{i} OR LOWER(f.path) LIKE $mu{i}) THEN 3 ELSE 0 END)");
+                }
+            }
+            if (!any) sbScore.Append("0");
 
             var values = string.Join(",", hits1.Select(h => $"({h.RowId},{h.BaseScore.ToString(CultureInfo.InvariantCulture)},{h.Stage1Score})"));
             string selSize = _hasSize ? "COALESCE(f.size,0) AS size" : "0 AS size";
@@ -466,6 +480,7 @@ SELECT * FROM hits;";
             string selCtime = _hasCtime ? "COALESCE(f.ctime_unix,0) AS ctime_unix" : "0 AS ctime_unix";
             string selSummary = _hasSummary ? "COALESCE(f.summary,'') AS summary" : "'' AS summary";
             string selSnippet = _hasSnippet ? "COALESCE(f.snippet,'') AS snippet" : "'' AS snippet";
+            string selTags = _hasTags ? "COALESCE(f.tags,'') AS tags" : "'' AS tags";
             string selExt = _hasExt ? "COALESCE(f.ext,'') AS ext" : "'' AS ext";
             string dateCol = _hasMtime ? "mtime_unix" : _hasCtime ? "ctime_unix" : "rowid";
 
@@ -475,7 +490,7 @@ hits AS (
   SELECT f.{_idCol} AS rowid,
          f.name, {selExt}, f.path,
          {selSize}, {selMtime}, {selCtime},
-         {selSummary}, {selSnippet},
+         {selSummary}, {selSnippet}, {selTags},
          ({sbScore}) AS term_score,
          h1.base_score AS base_score,
          h1.s1 AS stage1_score
@@ -489,6 +504,8 @@ SELECT * FROM hits;";
             cmd.CommandText = sql;
             for (int i = 0; i < q.Terms.Count; i++)
                 cmd.Parameters.AddWithValue($"$t{i}", "%" + q.Terms[i].ToLowerInvariant().Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%");
+            for (int i = 0; i < q.Must.Count; i++)
+                cmd.Parameters.AddWithValue($"$mu{i}", "%" + q.Must[i].ToLowerInvariant().Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%");
 
             var list = new List<SearchRow>();
             using var r = await cmd.ExecuteReaderAsync(ct);
@@ -505,15 +522,16 @@ SELECT * FROM hits;";
                     CtimeUnix = r.GetInt64(6),
                     Summary = r.GetString(7),
                     Snippet = r.GetString(8),
-                    TermScore = r.GetInt32(9),
-                    BaseScore = r.GetDouble(10),
-                    Stage1Score = r.GetInt32(11)
+                    Tags = r.GetString(9),
+                    TermScore = r.GetInt32(10),
+                    BaseScore = r.GetDouble(11),
+                    Stage1Score = r.GetInt32(12)
                 });
             }
             return list;
         }
 
-        // 3) final：summary/snippet の出現回数を加点し、合計スコア上位5件
+        // 3) final：summary/snippet/tags（存在する場合のみ） の出現回数を加点し、合計スコア上位5件
         private List<SearchRow> FinalTop5ByScoring(Nq q, List<SearchRow> hits2)
         {
             if (hits2.Count == 0) return new();
@@ -527,14 +545,18 @@ SELECT * FROM hits;";
                 int ss = 0;
                 var sum = L(h.Summary);
                 var sni = L(h.Snippet);
+                var tag = L(h.Tags);
 
-                foreach (var term in q.Terms)
+                // terms + must を対象。列がある場合のみ加点。
+                IEnumerable<string> tokens = q.Terms.Concat(q.Must);
+                foreach (var term in tokens)
                 {
                     var t = term?.Trim();
                     if (string.IsNullOrEmpty(t)) continue;
                     var tl = t.ToLowerInvariant();
-                    ss += CountOccurrences(sum, tl);
-                    ss += CountOccurrences(sni, tl);
+                    if (_hasSummary) ss += CountOccurrences(sum, tl);
+                    if (_hasSnippet) ss += CountOccurrences(sni, tl);
+                    if (_hasTags) ss += CountOccurrences(tag, tl);
                 }
 
                 int total = h.Stage1Score + h.TermScore + ss;

@@ -1,9 +1,13 @@
-using System;
+ï»¿using System;
+using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows;
-using Explore.UI; // UiSettings
-using WpfMessageBox = System.Windows.MessageBox; // WPF‚ÌMessageBox‚É–¾¦ƒGƒCƒŠƒAƒX
+using Explore.UI;             // UiSettings
+using Explore.Indexing;       // IndexDatabase
+using Microsoft.Data.Sqlite;  // SQLite
+using WpfMessageBox = System.Windows.MessageBox; // WPFã®MessageBoxã«æ˜ç¤ºã‚¨ã‚¤ãƒªã‚¢ã‚¹
 
 namespace Explore
 {
@@ -14,11 +18,13 @@ namespace Explore
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Explore");
         private string ApiKeyFilePath => Path.Combine(_appDataDir, "gemini_api_key.txt");
 
+        private string? _dbPath;
+
         public SettingsWindow()
         {
             InitializeComponent();
 
-            // Šù‘¶‚Ì UI İ’èiƒCƒ“ƒfƒbƒNƒXŒnj‚ğ”½‰f
+            // æ—¢å­˜ã® UI è¨­å®šï¼ˆã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ç³»ï¼‰ã‚’åæ˜ 
             try
             {
                 AutoIndexBox.IsChecked = UiSettings.Instance.AutoIndexOnSelect;
@@ -27,29 +33,45 @@ namespace Explore
             catch (Exception ex)
             {
                 WpfMessageBox.Show(this,
-                    $"İ’è‚Ì“Ç‚İ‚İ‚É¸”s‚µ‚Ü‚µ‚½B\n{ex.Message}",
-                    "İ’è",
+                    $"è¨­å®šã®èª­ã¿è¾¼ã¿ã«å¤±æ•—ã—ã¾ã—ãŸã€‚\n{ex.Message}",
+                    "è¨­å®š",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
             }
 
-            // Šù‘¶‚Ì API ƒL[‚ğ“Ç‚İ‚ñ‚Å•\¦i•Û‘¶Œ³‚ğ©“®”»’èj
+            // æ—¢å­˜ã® API ã‚­ãƒ¼ã‚’èª­ã¿è¾¼ã‚“ã§è¡¨ç¤ºï¼ˆä¿å­˜å…ƒã‚’è‡ªå‹•åˆ¤å®šï¼‰
             LoadExistingGeminiKey();
+
+            // â˜… DBãƒ‘ã‚¹ã¯ static ãƒ—ãƒ­ãƒ‘ãƒ†ã‚£ã‚’å‹åã§å‚ç…§
+            try
+            {
+                _dbPath = IndexDatabase.DatabasePath;
+                DbPathText.Text = _dbPath;
+            }
+            catch (Exception ex)
+            {
+                DbPathText.Text = $"ï¼ˆDBãƒ‘ã‚¹ã®å–å¾—ã«å¤±æ•—ï¼‰{ex.Message}";
+            }
+        }
+
+        private async void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            await RefreshDbCountsAsync();
         }
 
         // ===== OK / Cancel =====
 
-        private void OnOK(object? sender, RoutedEventArgs e)
+        private async void OnOK(object? sender, RoutedEventArgs e)
         {
             try
             {
-                // 1) ƒCƒ“ƒfƒbƒNƒXŒn
+                // 1) ã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ç³»
                 UiSettings.Instance.AutoIndexOnSelect = AutoIndexBox.IsChecked == true;
                 UiSettings.Instance.IncludeSubfolders = IncludeSubsBox.IsChecked == true;
                 UiSettings.Instance.Save();
                 UiSettings.Instance.RaiseChanged();
 
-                // 2) Gemini API ƒL[•Û‘¶
+                // 2) Gemini API ã‚­ãƒ¼ä¿å­˜
                 var key = GetApiKeyInput().Trim();
 
                 if (StoreEnvRadio.IsChecked == true)
@@ -61,14 +83,17 @@ namespace Explore
                     SaveToFile(key);
                 }
 
+                // å¿µã®ãŸã‚ä»¶æ•°è¡¨ç¤ºã‚‚æœ€æ–°åŒ–
+                await RefreshDbCountsAsync();
+
                 DialogResult = true;
                 Close();
             }
             catch (Exception ex)
             {
                 WpfMessageBox.Show(this,
-                    $"İ’è‚Ì•Û‘¶‚É¸”s‚µ‚Ü‚µ‚½B\n{ex.Message}",
-                    "İ’è",
+                    $"è¨­å®šã®ä¿å­˜ã«å¤±æ•—ã—ã¾ã—ãŸã€‚\n{ex.Message}",
+                    "è¨­å®š",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
             }
@@ -80,21 +105,21 @@ namespace Explore
             Close();
         }
 
-        // ====== API ƒL[•\¦Ø‘Ö ======
+        // ====== API ã‚­ãƒ¼è¡¨ç¤ºåˆ‡æ›¿ ======
         private void OnShowApiChecked(object? sender, RoutedEventArgs e)
         {
             try
             {
                 if (ShowApiSwitch.IsChecked == true)
                 {
-                    // Password -> Plain ‚Ö“¯Šú‚µ‚Ä•\¦
+                    // Password -> Plain ã¸åŒæœŸã—ã¦è¡¨ç¤º
                     ApiKeyBoxPlain.Text = ApiKeyBox.Password;
                     ApiKeyBoxPlain.Visibility = Visibility.Visible;
                     ApiKeyBox.Visibility = Visibility.Collapsed;
                 }
                 else
                 {
-                    // Plain -> Password ‚Ö“¯Šú‚µ‚Ä‰B‚·
+                    // Plain -> Password ã¸åŒæœŸã—ã¦éš ã™
                     ApiKeyBox.Password = ApiKeyBoxPlain.Text;
                     ApiKeyBox.Visibility = Visibility.Visible;
                     ApiKeyBoxPlain.Visibility = Visibility.Collapsed;
@@ -102,11 +127,11 @@ namespace Explore
             }
             catch
             {
-                // ‰½‚à‚µ‚È‚¢iŒ©‚½–Ú‚ÌØ‘Ö‚¾‚¯j
+                // è¦‹ãŸç›®ã®åˆ‡æ›¿ã ã‘ãªã®ã§æ¡ã‚Šã¤ã¶ã—
             }
         }
 
-        // ====== “Ç‚İ‚İE•Û‘¶ˆ— ======
+        // ====== èª­ã¿è¾¼ã¿ãƒ»ä¿å­˜å‡¦ç†ï¼ˆAPIã‚­ãƒ¼ï¼‰ ======
 
         private void LoadExistingGeminiKey()
         {
@@ -117,33 +142,33 @@ namespace Explore
                 {
                     fileKey = File.ReadAllText(ApiKeyFilePath, Encoding.UTF8).Trim();
                 }
-                catch { /* “Ç‚ß‚È‚¢ê‡‚Í–³‹ */ }
+                catch { /* èª­ã‚ãªã„å ´åˆã¯ç„¡è¦– */ }
             }
 
             string? envUser = Environment.GetEnvironmentVariable("GEMINI_API_KEY", EnvironmentVariableTarget.User);
             string? envProc = Environment.GetEnvironmentVariable("GEMINI_API_KEY", EnvironmentVariableTarget.Process);
             string? envKey = !string.IsNullOrWhiteSpace(envUser) ? envUser : envProc;
 
-            // —Dæ‡ˆÊFƒtƒ@ƒCƒ‹ > ŠÂ‹«•Ï”iƒ†[ƒU[/ƒvƒƒZƒXj
+            // å„ªå…ˆé †ä½ï¼šãƒ•ã‚¡ã‚¤ãƒ« > ç’°å¢ƒå¤‰æ•°ï¼ˆãƒ¦ãƒ¼ã‚¶ãƒ¼/ãƒ—ãƒ­ã‚»ã‚¹ï¼‰
             if (!string.IsNullOrEmpty(fileKey))
             {
                 SetApiKeyInput(fileKey);
                 StoreFileRadio.IsChecked = true;
                 StoreEnvRadio.IsChecked = false;
-                ApiSourceNote.Text = $"Œ»İ: ƒtƒ@ƒCƒ‹i{ApiKeyFilePath}j‚©‚ç“Ç‚İ‚İ‚Ü‚µ‚½B";
+                ApiSourceNote.Text = $"ç¾åœ¨: ãƒ•ã‚¡ã‚¤ãƒ«ï¼ˆ{ApiKeyFilePath}ï¼‰ã‹ã‚‰èª­ã¿è¾¼ã¿ã¾ã—ãŸã€‚";
             }
             else if (!string.IsNullOrEmpty(envKey))
             {
                 SetApiKeyInput(envKey);
                 StoreEnvRadio.IsChecked = true;
                 StoreFileRadio.IsChecked = false;
-                ApiSourceNote.Text = "Œ»İ: ƒ†[ƒU[ŠÂ‹«•Ï” GEMINI_API_KEY ‚©‚ç“Ç‚İ‚İ‚Ü‚µ‚½B";
+                ApiSourceNote.Text = "ç¾åœ¨: ãƒ¦ãƒ¼ã‚¶ãƒ¼ç’°å¢ƒå¤‰æ•° GEMINI_API_KEY ã‹ã‚‰èª­ã¿è¾¼ã¿ã¾ã—ãŸã€‚";
             }
             else
             {
                 SetApiKeyInput(string.Empty);
-                StoreEnvRadio.IsChecked = true; // Šù’è‚ÍŠÂ‹«•Ï”‚É•Û‘¶
-                ApiSourceNote.Text = "Œ»İ: •Û‘¶‚³‚ê‚½ƒL[‚ÍŒ©‚Â‚©‚è‚Ü‚¹‚ñB";
+                StoreEnvRadio.IsChecked = true; // æ—¢å®šã¯ç’°å¢ƒå¤‰æ•°
+                ApiSourceNote.Text = "ç¾åœ¨: ä¿å­˜ã•ã‚ŒãŸã‚­ãƒ¼ã¯è¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã€‚";
             }
         }
 
@@ -151,47 +176,46 @@ namespace Explore
         {
             if (string.IsNullOrEmpty(key))
             {
-                // íœiƒNƒŠƒAj
+                // å‰Šé™¤ï¼ˆã‚¯ãƒªã‚¢ï¼‰
                 Environment.SetEnvironmentVariable("GEMINI_API_KEY", null, EnvironmentVariableTarget.User);
                 Environment.SetEnvironmentVariable("GEMINI_API_KEY", null, EnvironmentVariableTarget.Process);
-                ApiSourceNote.Text = "ŠÂ‹«•Ï” GEMINI_API_KEY ‚ğíœ‚µ‚Ü‚µ‚½B";
+                ApiSourceNote.Text = "ç’°å¢ƒå¤‰æ•° GEMINI_API_KEY ã‚’å‰Šé™¤ã—ã¾ã—ãŸã€‚";
                 return;
             }
 
-            // ƒ†[ƒU[ŠÂ‹«•Ï” + ƒJƒŒƒ“ƒgƒvƒƒZƒX‚É”½‰f
+            // ãƒ¦ãƒ¼ã‚¶ãƒ¼ç’°å¢ƒå¤‰æ•° + ã‚«ãƒ¬ãƒ³ãƒˆãƒ—ãƒ­ã‚»ã‚¹ã«åæ˜ 
             Environment.SetEnvironmentVariable("GEMINI_API_KEY", key, EnvironmentVariableTarget.User);
             Environment.SetEnvironmentVariable("GEMINI_API_KEY", key, EnvironmentVariableTarget.Process);
-            ApiSourceNote.Text = "ŠÂ‹«•Ï” GEMINI_API_KEY ‚É•Û‘¶‚µ‚Ü‚µ‚½i‚±‚ÌƒAƒvƒŠ‚Å‚Í’¼‚¿‚É—LŒøjB";
+            ApiSourceNote.Text = "ç’°å¢ƒå¤‰æ•° GEMINI_API_KEY ã«ä¿å­˜ã—ã¾ã—ãŸï¼ˆã“ã®ã‚¢ãƒ—ãƒªã§ã¯ç›´ã¡ã«æœ‰åŠ¹ï¼‰ã€‚";
         }
 
         private void SaveToFile(string key)
         {
-            // %APPDATA%\Explore\gemini_api_key.txt ‚É•Û‘¶i‹ó‚È‚çíœj
+            // %APPDATA%\Explore\gemini_api_key.txt ã«ä¿å­˜ï¼ˆç©ºãªã‚‰å‰Šé™¤ï¼‰
             Directory.CreateDirectory(_appDataDir);
 
             if (string.IsNullOrEmpty(key))
             {
                 if (File.Exists(ApiKeyFilePath))
                     File.Delete(ApiKeyFilePath);
-                ApiSourceNote.Text = $"ƒtƒ@ƒCƒ‹i{ApiKeyFilePath}j‚ğíœ‚µ‚Ü‚µ‚½B";
+                ApiSourceNote.Text = $"ãƒ•ã‚¡ã‚¤ãƒ«ï¼ˆ{ApiKeyFilePath}ï¼‰ã‚’å‰Šé™¤ã—ã¾ã—ãŸã€‚";
                 return;
             }
 
             File.WriteAllText(ApiKeyFilePath, key, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             try
             {
-                // ‰B‚µ‘®«‚ğ•t‚¯‚éi¸”s‚µ‚Ä‚à’v–½“I‚Å‚È‚¢j
+                // éš ã—å±æ€§ã‚’ä»˜ä¸ï¼ˆå¤±æ•—ã—ã¦ã‚‚è‡´å‘½çš„ã§ã¯ãªã„ï¼‰
                 var attr = File.GetAttributes(ApiKeyFilePath);
                 File.SetAttributes(ApiKeyFilePath, attr | FileAttributes.Hidden);
             }
             catch { /* ignore */ }
 
-            // Œ»ƒvƒƒZƒX‚É‚à”½‰f‚µ‚Ä‚·‚®g‚¦‚é‚æ‚¤‚É‚·‚é
+            // ç¾ãƒ—ãƒ­ã‚»ã‚¹ã«ã‚‚åæ˜ ã—ã¦ã™ãä½¿ãˆã‚‹ã‚ˆã†ã«ã™ã‚‹
             Environment.SetEnvironmentVariable("GEMINI_API_KEY", key, EnvironmentVariableTarget.Process);
-            ApiSourceNote.Text = $"ƒtƒ@ƒCƒ‹i{ApiKeyFilePath}j‚É•Û‘¶‚µ‚Ü‚µ‚½i‚±‚ÌƒAƒvƒŠ‚Å‚Í’¼‚¿‚É—LŒøjB";
+            ApiSourceNote.Text = $"ãƒ•ã‚¡ã‚¤ãƒ«ï¼ˆ{ApiKeyFilePath}ï¼‰ã«ä¿å­˜ã—ã¾ã—ãŸï¼ˆã“ã®ã‚¢ãƒ—ãƒªã§ã¯ç›´ã¡ã«æœ‰åŠ¹ï¼‰ã€‚";
         }
 
-        // “ü—Í—“‚Ìæ‚èo‚µEİ’èi•\¦Ø‘Ö‚É‘Î‰j
         private string GetApiKeyInput()
         {
             return (ShowApiSwitch.IsChecked == true) ? ApiKeyBoxPlain.Text : ApiKeyBox.Password;
@@ -201,6 +225,77 @@ namespace Explore
         {
             ApiKeyBox.Password = value ?? string.Empty;
             ApiKeyBoxPlain.Text = value ?? string.Empty;
+        }
+
+        // ====== DBä»¶æ•°ã®å†èª­è¾¼ ======
+
+        private async void OnReloadCounts(object sender, RoutedEventArgs e)
+        {
+            await RefreshDbCountsAsync();
+        }
+
+        private async Task RefreshDbCountsAsync()
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(_dbPath))
+                {
+                    FileCountText.Text = "â€”";
+                    FtsCountText.Text = "â€”";
+                    return;
+                }
+
+                if (!File.Exists(_dbPath))
+                {
+                    FileCountText.Text = "0ï¼ˆDBãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ï¼‰";
+                    FtsCountText.Text = "â€”";
+                    return;
+                }
+
+                long files = 0;
+                long? fts = null;
+
+                await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+                {
+                    await conn.OpenAsync();
+
+                    // files
+                    files = await ExecScalarLongAsync(conn, "SELECT COUNT(*) FROM files");
+
+                    // files_ftsï¼ˆå­˜åœ¨ã—ãªã„å ´åˆã¯ã€Œâ€”ã€è¡¨è¨˜ï¼‰
+                    try
+                    {
+                        fts = await ExecScalarLongAsync(conn, "SELECT COUNT(*) FROM files_fts");
+                    }
+                    catch
+                    {
+                        fts = null;
+                    }
+                }
+
+                var n = CultureInfo.CurrentCulture;
+                FileCountText.Text = files.ToString("N0", n);
+                FtsCountText.Text = (fts.HasValue ? fts.Value.ToString("N0", n) : "â€”");
+            }
+            catch (Exception ex)
+            {
+                FileCountText.Text = "â€”";
+                FtsCountText.Text = "â€”";
+                WpfMessageBox.Show(this,
+                    $"DBä»¶æ•°ã®å–å¾—ã«å¤±æ•—ã—ã¾ã—ãŸã€‚\n{ex.Message}",
+                    "ãƒ‡ãƒ¼ã‚¿ãƒ™ãƒ¼ã‚¹",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
+
+        private static async Task<long> ExecScalarLongAsync(SqliteConnection conn, string sql)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            var obj = await cmd.ExecuteScalarAsync();
+            if (obj == null || obj is DBNull) return 0L;
+            return Convert.ToInt64(obj, CultureInfo.InvariantCulture);
         }
     }
 }
