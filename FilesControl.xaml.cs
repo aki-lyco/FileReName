@@ -23,6 +23,15 @@ namespace Explore
 {
     public partial class FilesControl : System.Windows.Controls.UserControl, INotifyPropertyChanged
     {
+        // ========= 追加: セッション内だけ保持するUI状態メモリ =========
+        private static class SessionExplorerState
+        {
+            public static readonly HashSet<string> ExpandedPaths = new(StringComparer.OrdinalIgnoreCase);
+            public static string? LastSelectedPath;
+        }
+        private bool _initialized = false;
+        // ===========================================================
+
         private readonly ExplorerViewModel _vm = new(new DefaultFileSystemService());
         public ExplorerViewModel VM => _vm;
 
@@ -58,6 +67,8 @@ namespace Explore
             // ★ TreeView のイベントをコード側で紐付け（XAML直書きなし）
             FolderTree.SelectedItemChanged += OnFolderSelected;
             FolderTree.AddHandler(TreeViewItem.ExpandedEvent, new RoutedEventHandler(OnNodeExpanded));
+            // 追加: 折りたたみも追跡
+            FolderTree.AddHandler(TreeViewItem.CollapsedEvent, new RoutedEventHandler(OnNodeCollapsed));
 
             // ボタンや DataGrid のイベントもここで登録
             BtnNewCreate.Click += OnNewButtonClick;
@@ -72,19 +83,29 @@ namespace Explore
             FilesGrid.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnFilesGridMenuClick));
             FolderTree.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnFolderTreeMenuClick));
 
-            // 初期ロード
+            // 初期ロード（※Loadedはタブ再表示でも繰り返し発火するため、初回だけ実行）
             Loaded += async (_, __) =>
             {
+                if (_initialized) return;
+                _initialized = true;
+
                 DataContext = this;
                 await _db.EnsureCreatedAsync();
-                await _vm.LoadRootsAsync();
 
-                // ★ 初期表示：最初のルートを展開して右ペインへ表示
-                if (_vm.Roots.Count > 0)
+                if (_vm.Roots.Count == 0)
+                    await _vm.LoadRootsAsync(); // 既に読み込み済みなら再作成しない（表示維持）
+
+                // セッション中に保持していた選択・展開状態を復元
+                if (!await TryRestoreSelectionAndExpansionAsync())
                 {
-                    var first = _vm.Roots[0];
-                    await _vm.EnsureChildrenLoadedAsync(first);
-                    await NavigateAndFillAsync(first.FullPath);
+                    // 復元対象がなければ初期表示：最初のルートを展開して右ペインへ表示（従来仕様を尊重）
+                    if (_vm.Roots.Count > 0)
+                    {
+                        var first = _vm.Roots[0];
+                        await _vm.EnsureChildrenLoadedAsync(first);
+                        first.IsExpanded = true;
+                        await NavigateAndFillAsync(first.FullPath);
+                    }
                 }
             };
         }
@@ -114,13 +135,30 @@ namespace Explore
         private async void OnFolderSelected(object? sender, RoutedPropertyChangedEventArgs<object> e)
         {
             if (e.NewValue is not FolderNode node) return;
+            // 追加: 最後に選んだフォルダをセッション保存
+            SessionExplorerState.LastSelectedPath = node.FullPath;
+
             await NavigateAndFillAsync(node.FullPath);
         }
 
         private async void OnNodeExpanded(object? sender, RoutedEventArgs e)
         {
             if (e.OriginalSource is TreeViewItem tvi && tvi.DataContext is FolderNode node)
+            {
                 await _vm.EnsureChildrenLoadedAsync(node);
+                // 追加: 展開パスを記録
+                if (Directory.Exists(node.FullPath))
+                    SessionExplorerState.ExpandedPaths.Add(node.FullPath);
+            }
+        }
+
+        // 追加: 折りたたみ追跡
+        private void OnNodeCollapsed(object? sender, RoutedEventArgs e)
+        {
+            if (e.OriginalSource is TreeViewItem tvi && tvi.DataContext is FolderNode node)
+            {
+                SessionExplorerState.ExpandedPaths.Remove(node.FullPath);
+            }
         }
 
         private async Task NavigateAndFillAsync(string? path)
@@ -459,7 +497,6 @@ namespace Explore
                         Mime = null,
                         Summary = null,
                         Snippet = null,
-                        Tags = null,
                         Classified = null,
                         IndexedAt = 0
                     };
@@ -668,5 +705,83 @@ namespace Explore
             }
         }
         #endregion
+
+        // ========= 追加: 展開・選択状態の復元ロジック =========
+        private async Task<bool> TryRestoreSelectionAndExpansionAsync()
+        {
+            bool didSomething = false;
+
+            // 1) 展開状態の復元（親から順に）
+            var expanded = SessionExplorerState.ExpandedPaths
+                .Where(Directory.Exists)
+                .OrderBy(p => p.Length) // 親→子の順で開く
+                .ToArray();
+
+            foreach (var p in expanded)
+            {
+                if (await TryExpandPathAsync(p))
+                    didSomething = true;
+            }
+
+            // 2) 最後に選択していたフォルダへナビゲーション
+            var last = SessionExplorerState.LastSelectedPath;
+            if (!string.IsNullOrWhiteSpace(last) && Directory.Exists(last))
+            {
+                await TryExpandPathAsync(last); // 祖先が閉じていても辿れるように
+                await NavigateAndFillAsync(last);
+                didSomething = true;
+            }
+
+            return didSomething;
+        }
+
+        private async Task<bool> TryExpandPathAsync(string path)
+        {
+            try
+            {
+                // ルート（ドライブ）ノードを特定
+                var rootPath = Path.GetPathRoot(path) ?? "";
+                var root = _vm.Roots.FirstOrDefault(r =>
+                    string.Equals(r.FullPath, rootPath, StringComparison.OrdinalIgnoreCase));
+                if (root == null) return false;
+
+                await _vm.EnsureChildrenLoadedAsync(root);
+                root.IsExpanded = true;
+
+                // ルート配下を1階層ずつ辿る
+                var remain = path.Substring(rootPath.Length).Trim('\\');
+                if (remain.Length == 0) return true;
+
+                var parts = remain.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                                  .Where(s => !string.IsNullOrWhiteSpace(s));
+
+                var current = root;
+                foreach (var part in parts)
+                {
+                    var nextFull = Path.Combine(current.FullPath, part);
+                    var next = current.Children.FirstOrDefault(c =>
+                        string.Equals(c.FullPath, nextFull, StringComparison.OrdinalIgnoreCase));
+                    if (next == null)
+                    {
+                        // 子がまだ生成されていない可能性 → 読み込んで再検索
+                        await _vm.EnsureChildrenLoadedAsync(current);
+                        next = current.Children.FirstOrDefault(c =>
+                            string.Equals(c.FullPath, nextFull, StringComparison.OrdinalIgnoreCase));
+                        if (next == null) return false;
+                    }
+
+                    await _vm.EnsureChildrenLoadedAsync(next);
+                    next.IsExpanded = true;
+                    current = next;
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        // =======================================================
     }
 }
