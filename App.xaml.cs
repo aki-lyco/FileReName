@@ -42,7 +42,7 @@ namespace Explore
         {
             base.OnStartup(e);
 
-            // ---- 単一起動（多重起動でロックされないように）----
+            // ---- 単一起動 ----
             bool createdNew = false;
             try
             {
@@ -63,7 +63,7 @@ namespace Explore
                 return;
             }
 
-            // ---- 外部ツール(Poppler/Tesseract/tessdata)を初回DL＆パス設定 ----
+            // ---- 外部ツール整備 ----
             try
             {
                 await SetupExternalAssetsAsync().ConfigureAwait(true); // TextExtractor が動く前に実施
@@ -73,10 +73,10 @@ namespace Explore
                 System.Diagnostics.Debug.WriteLine("External assets setup failed: " + ex);
             }
 
-            // ---- テーマ辞書を安全に読み込み（失敗しても続行）----
+            // ---- テーマ ----
             TryLoadThemeDictionary();
 
-            // ---- MainWindow を必ず表示 ----
+            // ---- MainWindow ----
             try
             {
                 if (this.MainWindow == null)
@@ -93,19 +93,22 @@ namespace Explore
                 return;
             }
 
-            // ---- 初回セットアップ(DB更新) を UI が落ち着いてから表示（await で待機）----
+            // ---- 設定に従って「初回セットアップ」を出すか判断 ----
             try
             {
-                await Dispatcher.InvokeAsync(() =>
+                var settings = AppSettings.Load(); // ★ 既存の settings.json を読む
+                if (settings.Dev.AlwaysShowFirstRun) // ★ true のときだけ表示
                 {
-                    var settings = new AppSettings(); // 既存の設定読み込みに差し替え可
-                    var dlg = new FirstRunDialog(settings)
+                    await Dispatcher.InvokeAsync(() =>
                     {
-                        Owner = this.MainWindow,
-                        WindowStartupLocation = WindowStartupLocation.CenterOwner
-                    };
-                    dlg.ShowDialog();
-                }, DispatcherPriority.Background);
+                        var dlg = new FirstRunDialog(settings)
+                        {
+                            Owner = this.MainWindow,
+                            WindowStartupLocation = WindowStartupLocation.CenterOwner
+                        };
+                        dlg.ShowDialog(); // チェックされたらダイアログ側で保存して二度と出ない
+                    }, DispatcherPriority.Background);
+                }
             }
             catch (Exception ex)
             {
@@ -154,10 +157,9 @@ namespace Explore
             base.OnExit(e);
         }
 
-        // 外部アセットの取得＆環境変数セット
+        // 外部アセットの取得＆環境変数セット（既存のまま）
         private static async Task SetupExternalAssetsAsync()
         {
-            // 1) マニフェスト(Embedded Resource)を読む
             var asm = Assembly.GetExecutingAssembly();
             using (var s = asm.GetManifestResourceStream("Explore.AssetsManifest.json"))
             {
@@ -167,7 +169,6 @@ namespace Explore
                 }
             }
 
-            // ユーティリティ：配下を再帰的に1個見つけたら返す
             static string? FindUnder(string? root, string file)
             {
                 if (root == null || !Directory.Exists(root)) return null;
@@ -180,15 +181,12 @@ namespace Explore
                 return null;
             }
 
-            // 2) Poppler の exe を探す（assets 配下を再帰検索）
             var popRoot = ExternalAssets.TryResolve("poppler");
             var popPdftotext = FindUnder(popRoot, "pdftotext.exe");
             var popPdftoppm = FindUnder(popRoot, "pdftoppm.exe");
             if (popPdftotext != null) Environment.SetEnvironmentVariable("PDFTOTEXT_EXE", popPdftotext);
             if (popPdftoppm != null) Environment.SetEnvironmentVariable("PDFTOPPM_EXE", popPdftoppm);
 
-            // 3) Tesseract の exe を探す
-            // まず一般的な既定インストール先（インストーラで入れた場合）
             string[] probables =
             {
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),     "Tesseract-OCR", "tesseract.exe"),
@@ -196,7 +194,6 @@ namespace Explore
             };
             string? tesseractExe = Array.Find(probables, File.Exists);
 
-            // 見つからなければ assets 配下を再帰検索（ポータブル or 自己展開ZIP想定）
             if (tesseractExe == null)
             {
                 var tesRoot = ExternalAssets.TryResolve("tesseract");
@@ -207,7 +204,6 @@ namespace Explore
             {
                 Environment.SetEnvironmentVariable("TESSERACT_EXE", tesseractExe);
 
-                // tessdata の場所を推定：assets 配下の tesseract\tessdata を最優先
                 string? tessdataDir = null;
                 var tesRoot = ExternalAssets.TryResolve("tesseract");
                 if (tesRoot != null)
@@ -215,7 +211,6 @@ namespace Explore
                     var candidate = Path.Combine(tesRoot, "tesseract", "tessdata");
                     if (Directory.Exists(candidate)) tessdataDir = candidate;
                 }
-                // 無ければ Program Files 内の tessdata
                 if (tessdataDir == null)
                 {
                     var pf = Path.GetDirectoryName(tesseractExe);
@@ -225,13 +220,11 @@ namespace Explore
 
                 if (tessdataDir != null)
                 {
-                    // TESSDATA_PREFIX は tessdata の親ディレクトリを指す必要がある
                     var prefix = Path.GetDirectoryName(tessdataDir);
                     if (!string.IsNullOrEmpty(prefix))
                         Environment.SetEnvironmentVariable("TESSDATA_PREFIX", prefix);
                 }
 
-                // 既定のOCR言語
                 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TESSERACT_LANG")))
                 {
                     Environment.SetEnvironmentVariable("TESSERACT_LANG", "jpn+eng");
@@ -241,7 +234,6 @@ namespace Explore
 
         private static void ShowFatal(Exception ex, string title)
         {
-            // 連発防止：最初の1回だけダイアログ表示。以降はログのみ。
             if (_shown == 0)
             {
                 _shown = 1;
@@ -252,10 +244,8 @@ namespace Explore
                         "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
-                catch { /* 下のフォールバックへ */ }
+                catch { }
             }
-
-            // 2回目以降はログのみ
             try { WriteCrashLog(ex); } catch { }
         }
 

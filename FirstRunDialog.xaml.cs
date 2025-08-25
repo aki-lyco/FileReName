@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -16,7 +17,7 @@ namespace Explore
     {
         private readonly IndexDatabase _db = new();
         private CancellationTokenSource? _cts;
-        private bool _finished; // 完了/中止後に「Close」表示へ切り替え
+        private bool _finished; // 実行完了/中止後に「Close」ボタン化
 
         public AppSettings Settings { get; }
 
@@ -33,23 +34,51 @@ namespace Explore
         private string _detail = "";
         public string DetailLine { get => _detail; set { if (_detail != value) { _detail = value; OnPropertyChanged(); } } }
 
-        // ★ 完了表示用
+        // 完了表示
         private bool _showCompletion;
         public bool ShowCompletion { get => _showCompletion; set { if (_showCompletion != value) { _showCompletion = value; OnPropertyChanged(); } } }
 
         private string _completionMessage = "";
         public string CompletionMessage { get => _completionMessage; set { if (_completionMessage != value) { _completionMessage = value; OnPropertyChanged(); } } }
 
+        // ★ 追加：今後表示しない（チェックされたら即保存もする）
+        private bool _dontShowAgain;
+        public bool DontShowAgain
+        {
+            get => _dontShowAgain;
+            set
+            {
+                if (_dontShowAgain == value) return;
+                _dontShowAgain = value;
+                OnPropertyChanged();
+                if (value)
+                {
+                    try
+                    {
+                        if (Settings.Dev.AlwaysShowFirstRun)
+                        {
+                            Settings.Dev.AlwaysShowFirstRun = false;
+                            Settings.Save();
+                        }
+                    }
+                    catch { /* 保存失敗は起動継続 */ }
+                }
+            }
+        }
+
         public event PropertyChangedEventHandler? PropertyChanged;
         private void OnPropertyChanged([CallerMemberName] string? name = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-        // -------------------------
 
         public FirstRunDialog(AppSettings settings)
         {
             InitializeComponent();
             Settings = settings;
             DataContext = this;
+
+            // 既定は未チェック（＝今後も表示）。既に非表示設定ならチェック済みに見せることもできるが、
+            // ここでは毎回 false で始める。
+            DontShowAgain = false;
         }
 
         private async void OnStartClick(object sender, RoutedEventArgs e)
@@ -109,7 +138,7 @@ namespace Explore
                 StatusLine = $"Discovered {discovered:N0} / Indexed {scanned:N0} (New {inserted:N0})";
                 DetailLine = $"Time {sw.Elapsed.TotalSeconds:N1}s | Skipped {skipped:N0}";
 
-                // ★ 完了メッセージを表示
+                // 完了表示
                 CompletionMessage = "完了しました";
                 ShowCompletion = true;
 
@@ -159,10 +188,25 @@ namespace Explore
             Close();
         }
 
+        protected override void OnClosed(EventArgs e)
+        {
+            // 念のため、チェック済みならクローズ時にも保存（即時保存に失敗したケースの保険）
+            try
+            {
+                if (DontShowAgain && Settings.Dev.AlwaysShowFirstRun)
+                {
+                    Settings.Dev.AlwaysShowFirstRun = false;
+                    Settings.Save();
+                }
+            }
+            catch { /* 無視 */ }
+            base.OnClosed(e);
+        }
+
         // --------- HOT 列挙（try の外で yield） ---------
         private async IAsyncEnumerable<DbFileRecord> EnumerateHotAsync(
             AppSettings s,
-            [EnumeratorCancellation] CancellationToken ct,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct,
             Action<string>? onSeen = null,
             Action<string>? onSkip = null)
         {

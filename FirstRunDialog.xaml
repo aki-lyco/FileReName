@@ -1,59 +1,79 @@
 ﻿<Window x:Class="Explore.FirstRunDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:conv="clr-namespace:FileReName.Converters"
         Title="初回セットアップ（Hot Start）"
-        Height="320" Width="620"
-        WindowStartupLocation="CenterScreen"
+        Height="320" Width="560"
+        WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        ShowInTaskbar="False"
-        WindowStyle="SingleBorderWindow">
-    <Window.Resources>
-        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
-    </Window.Resources>
+        ShowInTaskbar="False">
 
-    <Grid Margin="14">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+	<!-- ▼ 追加：可視性コンバータをリソースで用意 -->
+	<Window.Resources>
+		<BooleanToVisibilityConverter x:Key="BoolToVis" />
+		<!-- もし自作のコンバータ(FileReName.Converters)を使いたい場合は↓に切替
+        xmlns:conv="clr-namespace:FileReName.Converters"
+        <conv:BoolToVisibilityConverter x:Key="BoolToVis" />
+        -->
+	</Window.Resources>
+	<!-- ▲ 追加ここまで -->
 
-        <TextBlock FontSize="16" FontWeight="SemiBold"
-               Text="DB を更新して、すぐ使える状態にします（Hot Start）"
-               Margin="0,0,0,12"/>
-        <TextBlock Grid.Row="1" TextWrapping="Wrap"
-               Text="既知フォルダーや最近のファイルを優先的に取り込みます。システム/隠しなど一部は除外します。"
-               Margin="0,0,0,16"/>
+	<Grid Margin="10">
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="10"/>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="10"/>
+			<RowDefinition Height="*"/>
+			<RowDefinition Height="10"/>
+			<RowDefinition Height="Auto"/>
+		</Grid.RowDefinitions>
 
-        <ProgressBar Grid.Row="2" Height="14" Minimum="0" Maximum="100"
-                 Value="{Binding Percent, Mode=OneWay}" />
+		<!-- 見出し -->
+		<TextBlock Grid.Row="0" Text="DB を更新して、すぐ使える状態にします（Hot Start）"
+                   FontSize="16" FontWeight="Bold" />
 
-        <!-- ステータス + 完了表示 -->
-        <StackPanel Grid.Row="3" Orientation="Vertical" Margin="0,10,0,10">
-            <TextBlock Text="{Binding Phase}" FontWeight="SemiBold"/>
-            <TextBlock Margin="0,4,0,0" Text="{Binding StatusLine}"/>
-            <TextBlock Margin="0,4,0,0" Text="{Binding DetailLine}" />
-            <!-- 完了メッセージ（成功時のみ表示） -->
-            <TextBlock Margin="0,8,0,0"
-                 Text="{Binding CompletionMessage}"
-                 FontWeight="Bold"
-                 Foreground="{DynamicResource ThemeBrush}"
-                 Visibility="{Binding ShowCompletion, Converter={StaticResource BoolToVisibility}}"/>
-        </StackPanel>
+		<Rectangle Grid.Row="1" Height="1" Fill="#33000000"/>
 
-        <!-- ボタン列 -->
-        <DockPanel Grid.Row="4">
-            <CheckBox Content="完了後もバックグラウンドで続ける"
-                VerticalAlignment="Center"
-                IsChecked="{Binding Settings.FirstRun.ColdIndexInBackground}"
-                DockPanel.Dock="Left"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" DockPanel.Dock="Right">
-                <Button x:Name="StartBtn" Content="DBを更新（Hot Start）" Width="180" Height="30" Margin="0,0,6,0" Click="OnStartClick"/>
-                <Button x:Name="CancelBtn" Content="閉じる" Width="150" Height="30" Click="OnCancelClick"/>
-            </StackPanel>
-        </DockPanel>
-    </Grid>
+		<!-- 進捗 -->
+		<StackPanel Grid.Row="2" Orientation="Vertical" Margin="0,8,0,0">
+			<ProgressBar Height="14" Minimum="0" Maximum="100"
+                         Value="{Binding Percent}"/>
+			<TextBlock Text="{Binding Phase}" Margin="0,6,0,0"/>
+		</StackPanel>
+
+		<!-- 詳細 -->
+		<StackPanel Grid.Row="4" Orientation="Vertical">
+			<TextBlock Text="{Binding StatusLine}" />
+			<TextBlock Text="{Binding DetailLine}" Foreground="#666" Margin="0,2,0,0"/>
+			<!-- 完了表示（ShowCompletion=true のときだけ） -->
+			<Border Margin="0,10,0,0" Padding="8"
+                    Background="#F1FFF1" BorderBrush="#C6EBC6" BorderThickness="1"
+                    Visibility="{Binding ShowCompletion, Converter={StaticResource BoolToVis}}">
+				<TextBlock Text="{Binding CompletionMessage}" Foreground="#08660A" FontWeight="SemiBold"/>
+			</Border>
+		</StackPanel>
+
+		<Rectangle Grid.Row="5" Height="1" Fill="#33000000"/>
+
+		<!-- 下部操作 -->
+		<StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Stretch">
+			<!-- 「今後表示しない」 -->
+			<CheckBox x:Name="DontShowAgainCheck"
+                      Content="今後表示しない"
+                      IsChecked="{Binding DontShowAgain, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      VerticalAlignment="Center"
+                      Margin="4,0,12,0"/>
+
+			<StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+				<Button x:Name="StartBtn"
+                        Content="DBを更新（Hot Start）"
+                        Click="OnStartClick"
+                        MinWidth="180" Margin="0,0,6,0"/>
+				<Button x:Name="CancelBtn"
+                        Content="閉じる"
+                        Click="OnCancelClick"
+                        MinWidth="120"/>
+			</StackPanel>
+		</StackPanel>
+	</Grid>
 </Window>
