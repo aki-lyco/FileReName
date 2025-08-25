@@ -63,14 +63,14 @@ namespace Explore
                 return;
             }
 
-            // ---- 外部ツール整備 ----
+            // ---- 外部ツール整備：初回のみ await、以後はBGで ----
             try
             {
-                await SetupExternalAssetsAsync().ConfigureAwait(true); // TextExtractor が動く前に実施
+                await PrepareExternalAssetsAsync().ConfigureAwait(true);
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("External assets setup failed: " + ex);
+                System.Diagnostics.Debug.WriteLine("External assets prepare failed: " + ex);
             }
 
             // ---- テーマ ----
@@ -157,18 +157,56 @@ namespace Explore
             base.OnExit(e);
         }
 
-        // 外部アセットの取得＆環境変数セット（既存のまま）
-        private static async Task SetupExternalAssetsAsync()
+        // ========== ここから：B案の実装 ==========
+        /// <summary>
+        /// 外部ツールが未整備なら await で揃える。揃っていれば BG で最新化（起動をブロックしない）。
+        /// </summary>
+        private async Task PrepareExternalAssetsAsync()
         {
-            var asm = Assembly.GetExecutingAssembly();
-            using (var s = asm.GetManifestResourceStream("Explore.AssetsManifest.json"))
+            var ready = AreExternalToolsAvailableQuickCheck();
+
+            if (!ready)
             {
-                if (s != null)
-                {
-                    await ExternalAssets.EnsureAllAsync(s).ConfigureAwait(false);
-                }
+                // ★ 初回など：待って確実に整える
+                await SetupExternalAssetsAsync().ConfigureAwait(true);
+            }
+            else
+            {
+                // ★ 2回目以降：起動をブロックしない（警告CS4014を出さないため discard）
+                _ = Task.Run(() => SetupExternalAssetsAsync());
+            }
+        }
+
+        /// <summary>
+        /// すでに使用可能な Poppler/Tesseract があるか簡易チェック。
+        /// env 変数 → 既知パス → assets 配下の順で軽く探す。
+        /// </summary>
+        private static bool AreExternalToolsAvailableQuickCheck()
+        {
+            // 1) まずは env を見る
+            string? pdftext = Environment.GetEnvironmentVariable("PDFTOTEXT_EXE");
+            string? pdfppm = Environment.GetEnvironmentVariable("PDFTOPPM_EXE");
+            string? tesser = Environment.GetEnvironmentVariable("TESSERACT_EXE");
+
+            bool popplerOk = !string.IsNullOrWhiteSpace(pdftext) && File.Exists(pdftext)
+                          && !string.IsNullOrWhiteSpace(pdfppm) && File.Exists(pdfppm);
+            bool tessOk = !string.IsNullOrWhiteSpace(tesser) && File.Exists(tesser);
+
+            if (popplerOk && tessOk) return true;
+
+            // 2) 既定インストール先（Tesseract）
+            string[] probables =
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),     "Tesseract-OCR", "tesseract.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Tesseract-OCR", "tesseract.exe")
+            };
+            if (!tessOk)
+            {
+                foreach (var p in probables)
+                    if (File.Exists(p)) { tessOk = true; break; }
             }
 
+            // 3) assets 配下を軽く再帰検索（Poppler / Tesseract）
             static string? FindUnder(string? root, string file)
             {
                 if (root == null || !Directory.Exists(root)) return null;
@@ -181,12 +219,61 @@ namespace Explore
                 return null;
             }
 
+            if (!popplerOk)
+            {
+                var popRoot = ExternalAssets.TryResolve("poppler");
+                var a = FindUnder(popRoot, "pdftotext.exe");
+                var b = FindUnder(popRoot, "pdftoppm.exe");
+                popplerOk = a != null && b != null;
+            }
+            if (!tessOk)
+            {
+                var tesRoot = ExternalAssets.TryResolve("tesseract");
+                var t = FindUnder(tesRoot, "tesseract.exe");
+                tessOk = t != null;
+            }
+
+            return popplerOk && tessOk;
+        }
+        // ========== ここまで：B案の実装 ==========
+
+        /// <summary>
+        /// 外部アセットの取得＆環境変数セット（重い処理。状況に応じて await/非同期で呼ぶ）
+        /// </summary>
+        private static async Task SetupExternalAssetsAsync()
+        {
+            // 1) マニフェスト(Embedded Resource)を読む → 不足分をDL/展開/インストール
+            var asm = Assembly.GetExecutingAssembly();
+            using (var s = asm.GetManifestResourceStream("Explore.AssetsManifest.json"))
+            {
+                if (s != null)
+                {
+                    await ExternalAssets.EnsureAllAsync(s).ConfigureAwait(false);
+                }
+            }
+
+            // ユーティリティ：配下を再帰的に1個見つけたら返す
+            static string? FindUnder(string? root, string file)
+            {
+                if (root == null || !Directory.Exists(root)) return null;
+                try
+                {
+                    foreach (var p in Directory.EnumerateFiles(root, file, SearchOption.AllDirectories))
+                        return p;
+                }
+                catch { }
+                return null;
+            }
+
+            // 2) Poppler の exe を探す（assets 配下を再帰検索）
             var popRoot = ExternalAssets.TryResolve("poppler");
             var popPdftotext = FindUnder(popRoot, "pdftotext.exe");
             var popPdftoppm = FindUnder(popRoot, "pdftoppm.exe");
             if (popPdftotext != null) Environment.SetEnvironmentVariable("PDFTOTEXT_EXE", popPdftotext);
             if (popPdftoppm != null) Environment.SetEnvironmentVariable("PDFTOPPM_EXE", popPdftoppm);
 
+            // 3) Tesseract の exe を探す
+            // まず一般的な既定インストール先（インストーラで入れた場合）
             string[] probables =
             {
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),     "Tesseract-OCR", "tesseract.exe"),
@@ -194,6 +281,7 @@ namespace Explore
             };
             string? tesseractExe = Array.Find(probables, File.Exists);
 
+            // 見つからなければ assets 配下を再帰検索（ポータブル or 自己展開ZIP想定）
             if (tesseractExe == null)
             {
                 var tesRoot = ExternalAssets.TryResolve("tesseract");
@@ -204,6 +292,7 @@ namespace Explore
             {
                 Environment.SetEnvironmentVariable("TESSERACT_EXE", tesseractExe);
 
+                // tessdata の場所を推定：assets 配下の tesseract\tessdata を最優先
                 string? tessdataDir = null;
                 var tesRoot = ExternalAssets.TryResolve("tesseract");
                 if (tesRoot != null)
@@ -211,6 +300,7 @@ namespace Explore
                     var candidate = Path.Combine(tesRoot, "tesseract", "tessdata");
                     if (Directory.Exists(candidate)) tessdataDir = candidate;
                 }
+                // 無ければ Program Files 内の tessdata
                 if (tessdataDir == null)
                 {
                     var pf = Path.GetDirectoryName(tesseractExe);
@@ -220,11 +310,13 @@ namespace Explore
 
                 if (tessdataDir != null)
                 {
+                    // TESSDATA_PREFIX は tessdata の親ディレクトリを指す必要がある
                     var prefix = Path.GetDirectoryName(tessdataDir);
                     if (!string.IsNullOrEmpty(prefix))
                         Environment.SetEnvironmentVariable("TESSDATA_PREFIX", prefix);
                 }
 
+                // 既定のOCR言語（未設定なら）
                 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TESSERACT_LANG")))
                 {
                     Environment.SetEnvironmentVariable("TESSERACT_LANG", "jpn+eng");
