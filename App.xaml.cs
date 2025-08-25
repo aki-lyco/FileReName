@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows; // WPF
@@ -37,7 +38,7 @@ namespace Explore
             };
         }
 
-        protected override void OnStartup(StartupEventArgs e)
+        protected override async void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
 
@@ -62,6 +63,16 @@ namespace Explore
                 return;
             }
 
+            // ---- 外部ツール(Poppler/Tesseract/tessdata)を初回DL＆パス設定 ----
+            try
+            {
+                await SetupExternalAssetsAsync().ConfigureAwait(true); // TextExtractor が動く前に実施
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("External assets setup failed: " + ex);
+            }
+
             // ---- テーマ辞書を安全に読み込み（失敗しても続行）----
             TryLoadThemeDictionary();
 
@@ -82,29 +93,26 @@ namespace Explore
                 return;
             }
 
-            // ---- ここが追加点：開発中は毎回「初回セットアップ(DB更新)」を表示 ----
-            // MainWindow を表示した後、UIが落ち着いてからダイアログを出す
-            Dispatcher.BeginInvoke(new Action(() =>
+            // ---- 初回セットアップ(DB更新) を UI が落ち着いてから表示（await で待機）----
+            try
             {
-                try
+                await Dispatcher.InvokeAsync(() =>
                 {
-                    // AppSettings の作り方が別なら、この1行を既存の生成/読込APIに差し替え
-                    var settings = new AppSettings();
-
+                    var settings = new AppSettings(); // 既存の設定読み込みに差し替え可
                     var dlg = new FirstRunDialog(settings)
                     {
                         Owner = this.MainWindow,
                         WindowStartupLocation = WindowStartupLocation.CenterOwner
                     };
                     dlg.ShowDialog();
-                }
-                catch (Exception ex)
-                {
-                    WpfMessageBox.Show(
-                        "初回セットアップ画面の表示に失敗しました。\n\n" + ex.Message,
-                        "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-            }), DispatcherPriority.Background);
+                }, DispatcherPriority.Background);
+            }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(
+                    "初回セットアップ画面の表示に失敗しました。\n\n" + ex.Message,
+                    "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void TryLoadThemeDictionary()
@@ -144,6 +152,91 @@ namespace Explore
             }
             catch { }
             base.OnExit(e);
+        }
+
+        // 外部アセットの取得＆環境変数セット
+        private static async Task SetupExternalAssetsAsync()
+        {
+            // 1) マニフェスト(Embedded Resource)を読む
+            var asm = Assembly.GetExecutingAssembly();
+            using (var s = asm.GetManifestResourceStream("Explore.AssetsManifest.json"))
+            {
+                if (s != null)
+                {
+                    await ExternalAssets.EnsureAllAsync(s).ConfigureAwait(false);
+                }
+            }
+
+            // ユーティリティ：配下を再帰的に1個見つけたら返す
+            static string? FindUnder(string? root, string file)
+            {
+                if (root == null || !Directory.Exists(root)) return null;
+                try
+                {
+                    foreach (var p in Directory.EnumerateFiles(root, file, SearchOption.AllDirectories))
+                        return p;
+                }
+                catch { }
+                return null;
+            }
+
+            // 2) Poppler の exe を探す（assets 配下を再帰検索）
+            var popRoot = ExternalAssets.TryResolve("poppler");
+            var popPdftotext = FindUnder(popRoot, "pdftotext.exe");
+            var popPdftoppm = FindUnder(popRoot, "pdftoppm.exe");
+            if (popPdftotext != null) Environment.SetEnvironmentVariable("PDFTOTEXT_EXE", popPdftotext);
+            if (popPdftoppm != null) Environment.SetEnvironmentVariable("PDFTOPPM_EXE", popPdftoppm);
+
+            // 3) Tesseract の exe を探す
+            // まず一般的な既定インストール先（インストーラで入れた場合）
+            string[] probables =
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),     "Tesseract-OCR", "tesseract.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Tesseract-OCR", "tesseract.exe")
+            };
+            string? tesseractExe = Array.Find(probables, File.Exists);
+
+            // 見つからなければ assets 配下を再帰検索（ポータブル or 自己展開ZIP想定）
+            if (tesseractExe == null)
+            {
+                var tesRoot = ExternalAssets.TryResolve("tesseract");
+                tesseractExe = FindUnder(tesRoot, "tesseract.exe");
+            }
+
+            if (tesseractExe != null)
+            {
+                Environment.SetEnvironmentVariable("TESSERACT_EXE", tesseractExe);
+
+                // tessdata の場所を推定：assets 配下の tesseract\tessdata を最優先
+                string? tessdataDir = null;
+                var tesRoot = ExternalAssets.TryResolve("tesseract");
+                if (tesRoot != null)
+                {
+                    var candidate = Path.Combine(tesRoot, "tesseract", "tessdata");
+                    if (Directory.Exists(candidate)) tessdataDir = candidate;
+                }
+                // 無ければ Program Files 内の tessdata
+                if (tessdataDir == null)
+                {
+                    var pf = Path.GetDirectoryName(tesseractExe);
+                    var candidate = pf != null ? Path.Combine(pf, "tessdata") : null;
+                    if (candidate != null && Directory.Exists(candidate)) tessdataDir = candidate;
+                }
+
+                if (tessdataDir != null)
+                {
+                    // TESSDATA_PREFIX は tessdata の親ディレクトリを指す必要がある
+                    var prefix = Path.GetDirectoryName(tessdataDir);
+                    if (!string.IsNullOrEmpty(prefix))
+                        Environment.SetEnvironmentVariable("TESSDATA_PREFIX", prefix);
+                }
+
+                // 既定のOCR言語
+                if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TESSERACT_LANG")))
+                {
+                    Environment.SetEnvironmentVariable("TESSERACT_LANG", "jpn+eng");
+                }
+            }
         }
 
         private static void ShowFatal(Exception ex, string title)

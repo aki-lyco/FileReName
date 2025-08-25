@@ -1,0 +1,32 @@
+{
+  "assets": [
+    {
+      "name": "poppler",
+      "version": "25.07.0-0",
+      "url": "https://github.com/oschwartz10612/poppler-windows/releases/download/v25.07.0-0/Release-25.07.0-0.zip",
+      "sha256": "435e834794b62923038df78e0d1ce103084622594eccb335bf6edb6fce3a0a82",
+      "subdir": "poppler"
+    },
+    {
+      "name": "tesseract",
+      "version": "5.4.0.20240606",
+      "url": "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-5.4.0.20240606.exe",
+      "sha256": "C885FFF6998E0608BA4BB8AB51436E1C6775C2BAFC2559A19B423E18678B60C9",
+      "subdir": "tesseract"
+    },
+    {
+      "name": "tessdata-eng",
+      "version": "1.0.0",
+      "url": "https://files.pythonhosted.org/packages/b3/f6/27e5fe409a04698e448b84259dd84237279aa9562d28a07111a1023b6eae/tessdata.eng-1.0.0-py3-none-any.whl",
+      "sha256": "0b23a3201ea3a109e94cb8fe15d2efd9332c0d7ca89ee0459de0ec4e92c11ce7",
+      "subdir": "tesseract"
+    },
+    {
+      "name": "tessdata-jpn",
+      "version": "1.0.0",
+      "url": "https://files.pythonhosted.org/packages/d3/a6/a0419c9fc316409fd720d363785aed852cf8e001c8f8eb90b569fa5f9ad0/tessdata.jpn-1.0.0-py3-none-any.whl",
+      "sha256": "4866f67b87156c4b5483d519185a55061472a71a47613778d31e0a66bb4ad2eb",
+      "subdir": "tesseract"
+    }
+  ]
+}
