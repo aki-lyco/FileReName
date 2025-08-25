@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
@@ -104,12 +105,16 @@ namespace Explore
             StatusText = "すべてにチェックを入れました。";
         }
 
+        // ★ 適用：成功した行だけリストから削除
         public async Task ApplyAsync()
         {
             if (Items.Count == 0) { StatusText = "項目がありません"; return; }
 
             int ok = 0, skip = 0, fail = 0;
-            foreach (var item in Items.Where(x => x.Apply))
+            var appliedItems = new List<FileRenameItem>();
+
+            // 列挙中にコレクションを書き換えないようスナップショットで回す
+            foreach (var item in Items.Where(x => x.Apply).ToList())
             {
                 try
                 {
@@ -122,23 +127,46 @@ namespace Explore
 
                     if (string.Equals(item.OriginalFullPath, target, StringComparison.OrdinalIgnoreCase))
                     {
+                        // 変更なし
                         skip++;
                         continue;
                     }
 
                     File.Move(item.OriginalFullPath, target);
-                    item.OriginalFullPath = target;
-                    item.OriginalName = Path.GetFileName(target);
                     ok++;
+
+                    // 成功したものはリストから消す対象に
+                    appliedItems.Add(item);
                 }
                 catch
                 {
                     fail++;
                 }
             }
-            UpdatePreviews();
-            StatusText = $"適用完了：成功={ok}, 変更なし={skip}, 失敗={fail}";
+
+            if (appliedItems.Count > 0)
+            {
+                foreach (var it in appliedItems) Items.Remove(it);
+                OnCollectionChanged();
+            }
+            else
+            {
+                // 成功ゼロでもプレビューは更新しておく
+                UpdatePreviews();
+            }
+
+            StatusText = $"適用: {ok} / 変更なし: {skip} / 失敗: {fail}"
+                       + (appliedItems.Count > 0 ? "（適用済みはリストから削除しました）" : "");
             await Task.CompletedTask;
+        }
+
+        // ★ 全クリア（未適用でも全部消す）
+        public void ClearAll()
+        {
+            if (Items.Count == 0) { StatusText = "項目がありません"; return; }
+            Items.Clear();
+            OnCollectionChanged();
+            StatusText = "リストをクリアしました。";
         }
 
         // ▼ 追加：AI状態確認

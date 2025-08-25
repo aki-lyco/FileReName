@@ -23,6 +23,7 @@ namespace Explore
             BtnSuggest.Content = "候補作成";
             BtnSelectAll.Content = "すべて選択";
             BtnApply.Content = "選択を適用";
+            BtnClear.Content = "クリア";          // ★ 追加
             BtnCheckAI.Content = "AI状態確認";  // 追加ボタン
 
             ColApply.Header = "適用";
@@ -50,13 +51,15 @@ namespace Explore
         // すべて選択
         private void OnSelectAll(object sender, Wpf.RoutedEventArgs e) => Vm.SelectAll();
 
-        // 選択を適用
+        // 選択を適用（成功した行はViewModel側で自動的に削除）
         private async void OnApply(object sender, Wpf.RoutedEventArgs e) => await Vm.ApplyAsync();
 
-        // ▼ AI状態確認（追加）
+        // クリア（未適用でも全部消す）
+        private void OnClear(object sender, Wpf.RoutedEventArgs e) => Vm.ClearAll();
+
+        // ▼ AI状態確認
         private async void OnCheckAI(object sender, Wpf.RoutedEventArgs e)
         {
-            // 二重押し防止のため一時的に無効化
             if (sender is WpfControls.Button b) { b.IsEnabled = false; }
             try { await Vm.CheckAIAsync(); }
             finally { if (sender is WpfControls.Button b2) { b2.IsEnabled = true; } }

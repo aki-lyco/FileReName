@@ -5,61 +5,88 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d"
-             d:DesignWidth="900" d:DesignHeight="600">
-    <Grid Background="#FFF9F9F9" AllowDrop="True" Drop="OnDrop" DragOver="OnDragOver">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
+             d:DesignWidth="900" d:DesignHeight="600"
+             AllowDrop="True"
+             DragOver="OnDragOver"
+             Drop="OnDrop">
 
-        <TextBlock x:Name="TxtHeader" Grid.Row="0"
-               Text="" FontSize="18" FontWeight="Bold"
-               Margin="16,12,16,0"/>
+	<Grid>
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="6"/>
+			<RowDefinition Height="*"/>
+			<RowDefinition Height="Auto"/>
+		</Grid.RowDefinitions>
 
-        <StackPanel Orientation="Horizontal" Margin="16,8,16,8" Grid.Row="0" HorizontalAlignment="Left">
-            <Button x:Name="BtnAdd"       Click="OnAddFiles"  Margin="0,0,8,0"/>
-            <Button x:Name="BtnSuggest"   Click="OnSuggest"   Margin="0,0,8,0"/>
-            <Button x:Name="BtnSelectAll" Click="OnSelectAll" Margin="0,0,8,0"/>
-            <Button x:Name="BtnApply"     Click="OnApply"     Margin="0,0,8,0"/>
-            <Button x:Name="BtnCheckAI"   Click="OnCheckAI"   Margin="8,0,0,0"/>
-            <TextBlock Text="{Binding StatusText}" Margin="16,3,0,0" Foreground="Gray"/>
-        </StackPanel>
+		<!-- 見出し -->
+		<TextBlock Grid.Row="0"
+				   Text="AI リネーム" FontSize="18" FontWeight="Bold"
+				   Margin="12,10,12,0"/>
 
-        <Grid Grid.Row="1" Margin="16">
-            <DataGrid x:Name="Grid"
-                ItemsSource="{Binding Items}"
-                AutoGenerateColumns="False"
-                CanUserAddRows="False"
-                HeadersVisibility="Column"
-                IsReadOnly="False"
-                AlternatingRowBackground="#FFEFF6FF"
-                AlternationCount="2">
-                <DataGrid.Columns>
-                    <DataGridCheckBoxColumn x:Name="ColApply"     Width="60"
-                                   Binding="{Binding Apply, Mode=TwoWay}"/>
-                    <DataGridTextColumn     x:Name="ColOriginal"  Width="*"
-                                   Binding="{Binding OriginalName}" IsReadOnly="True"/>
-                    <DataGridTextColumn     x:Name="ColSuggested" Width="*"
-                                   Binding="{Binding SuggestedName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                    <DataGridTextColumn     x:Name="ColPreview"   Width="2*"
-                                   Binding="{Binding PreviewFullPath}" IsReadOnly="True"/>
-                </DataGrid.Columns>
-            </DataGrid>
+		<Rectangle Grid.Row="1" Height="1" Fill="#33000000" Margin="8,0,8,0"/>
 
-            <TextBlock x:Name="TxtHint"
-                 HorizontalAlignment="Center" VerticalAlignment="Center"
-                 FontSize="16" Foreground="Gray" Text="">
-                <TextBlock.Style>
-                    <Style TargetType="TextBlock">
-                        <Setter Property="Visibility" Value="Collapsed"/>
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding Items.Count}" Value="0">
-                                <Setter Property="Visibility" Value="Visible"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </TextBlock.Style>
-            </TextBlock>
-        </Grid>
-    </Grid>
+		<!-- 一覧＋操作 -->
+		<Grid Grid.Row="2" Margin="8">
+			<Grid.RowDefinitions>
+				<RowDefinition Height="Auto"/>
+				<RowDefinition Height="6"/>
+				<RowDefinition Height="*"/>
+			</Grid.RowDefinitions>
+
+			<!-- 操作ボタン行 -->
+			<StackPanel Grid.Row="0" Orientation="Horizontal" Margin="4,4,4,0">
+				<Button Click="OnAddFiles"  Margin="0,0,8,0" Content="ファイル追加…"/>
+				<Button Click="OnSuggest"   Margin="0,0,8,0" Content="候補作成"/>
+				<Button Click="OnSelectAll" Margin="0,0,8,0" Content="すべて選択"/>
+				<Button Click="OnApply"     Margin="0,0,8,0" Content="選択を適用"/>
+				<!-- ★ 追加：クリア -->
+				<Button Click="OnClear"     Margin="0,0,8,0" Content="クリア"/>
+				<Button Click="OnCheckAI"   Margin="8,0,0,0" Content="AI状態確認"/>
+				<TextBlock Text="{Binding StatusText}" Margin="16,3,0,0" Foreground="Gray"/>
+			</StackPanel>
+
+			<Rectangle Grid.Row="1" Height="1" Fill="#33000000"/>
+
+			<!-- データグリッド -->
+			<DataGrid Grid.Row="2"
+					  ItemsSource="{Binding Items}"
+					  AutoGenerateColumns="False"
+					  CanUserAddRows="False"
+					  HeadersVisibility="Column"
+					  IsReadOnly="False"
+					  AlternatingRowBackground="#FFEFF6FF"
+					  AlternationCount="2">
+				<DataGrid.Columns>
+					<DataGridCheckBoxColumn Header="適用"
+											Binding="{Binding Apply, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+											Width="60"/>
+					<DataGridTextColumn Header="元の名前"
+										Binding="{Binding OriginalName}"
+										Width="2*"/>
+					<DataGridTextColumn Header="提案名（AI）"
+										Binding="{Binding SuggestedName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+										Width="2*"/>
+					<DataGridTextColumn Header="適用先プレビュー"
+										Binding="{Binding PreviewFullPath}"
+										Width="3*"/>
+				</DataGrid.Columns>
+			</DataGrid>
+		</Grid>
+
+		<!-- ドロップヒント（リストが空の時だけ表示） -->
+		<TextBlock Grid.Row="3"
+				   Text="ここにファイルをドロップするか「ファイル追加…」をクリックしてください。"
+				   Margin="12,0,12,8" Foreground="#666">
+			<TextBlock.Style>
+				<Style TargetType="TextBlock">
+					<Setter Property="Visibility" Value="Collapsed"/>
+					<Style.Triggers>
+						<DataTrigger Binding="{Binding Items.Count}" Value="0">
+							<Setter Property="Visibility" Value="Visible"/>
+						</DataTrigger>
+					</Style.Triggers>
+				</Style>
+			</TextBlock.Style>
+		</TextBlock>
+	</Grid>
 </UserControl>
