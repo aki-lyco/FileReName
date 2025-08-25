@@ -5,6 +5,7 @@ using Explore.Build;
 // using Microsoft.Win32; // ← 衝突回避のため未使用
 using WinForms = System.Windows.Forms;          // Forms はエイリアスで使用
 using Win32 = Microsoft.Win32;                  // OpenFileDialog 用エイリアス
+using System.Collections;                       // ★ 追加：IList 用
 
 namespace Explore
 {
@@ -86,5 +87,35 @@ namespace Explore
                 }
             }
         }
+
+        // ===== ここから追加分（ListBox操作） =====
+
+        // 選択を削除（ListBox: SelectedList の選択項目だけ除去）
+        private void OnRemoveSelectedTargets(object sender, RoutedEventArgs e)
+        {
+            if (SelectedList?.ItemsSource is not IList src) return;
+            var toRemove = new System.Collections.Generic.List<object>();
+            foreach (var it in SelectedList.SelectedItems)
+                toRemove.Add(it);
+            foreach (var it in toRemove)
+                src.Remove(it);
+        }
+
+        // 全クリア
+        private void OnClearTargets(object sender, RoutedEventArgs e)
+        {
+            if (SelectedList?.ItemsSource is IList src) src.Clear();
+        }
+
+        // Delete キーで「選択を削除」  ※WPF型を完全修飾して曖昧さを回避
+        private void SelectedList_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key == System.Windows.Input.Key.Delete)
+            {
+                OnRemoveSelectedTargets(sender, new RoutedEventArgs());
+                e.Handled = true;
+            }
+        }
+        // ===== 追加ここまで =====
     }
 }

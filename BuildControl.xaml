@@ -74,9 +74,32 @@
 							<Button Content="次へ（設計へ）" Margin="16,4" Padding="16,6" Command="{Binding DecideTargets}"/>
 						</StackPanel>
 
-						<GroupBox Header="選択済み" Margin="0,24,0,0">
-							<ListBox ItemsSource="{Binding SelectedTargets}" Height="220"/>
+						<!-- ▼ ここだけ最小追記：見出し右に2ボタン、ListBoxに x:Name と KeyDown -->
+						<GroupBox Margin="0,24,0,0">
+							<GroupBox.Header>
+								<DockPanel LastChildFill="False">
+									<TextBlock Text="選択済み" VerticalAlignment="Center"/>
+									<StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+										<Button Content="選択を削除" Click="OnRemoveSelectedTargets" Margin="6,0,0,0" Padding="8,2"/>
+										<Button Content="クリア"     Click="OnClearTargets"          Margin="6,0,0,0" Padding="8,2"/>
+									</StackPanel>
+								</DockPanel>
+							</GroupBox.Header>
+
+							<ListBox x:Name="SelectedList"
+									 ItemsSource="{Binding SelectedTargets}"
+									 Height="220"
+									 SelectionMode="Extended"
+									 KeyDown="SelectedList_KeyDown">
+								<ListBox.ContextMenu>
+									<ContextMenu>
+										<MenuItem Header="選択を削除" Click="OnRemoveSelectedTargets"/>
+										<MenuItem Header="全クリア"   Click="OnClearTargets"/>
+									</ContextMenu>
+								</ListBox.ContextMenu>
+							</ListBox>
 						</GroupBox>
+						<!-- ▲ 追加ここまで -->
 					</StackPanel>
 				</Border>
 			</Grid>
