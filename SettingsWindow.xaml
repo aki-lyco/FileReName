@@ -44,18 +44,18 @@
 					<Border Padding="16">
 						<StackPanel>
 
-							<TextBlock Text="鮮度（Freshness）マーク一覧"
+							<TextBlock Text="鮮度（Freshness）状態一覧"
                                        FontSize="16" FontWeight="SemiBold" />
 							<TextBlock Margin="0,6,0,0" TextWrapping="Wrap">
-								ファイルとインデックス(DB)の同期状態を表すマークです。下表の基準で付与されます。
+								ファイルとインデックス（DB）の同期状態を示す**状態**です。下表の基準で判定されます。
 							</TextBlock>
 
-							<!-- 表（マーク / 状態名 / 意味） -->
+							<!-- 表（指標 / 状態名 / 説明） -->
 							<Border Margin="0,12,0,0" Padding="0"
                                     BorderBrush="#22000000" BorderThickness="1" CornerRadius="6">
 								<Grid>
 									<Grid.ColumnDefinitions>
-										<ColumnDefinition Width="70" />
+										<ColumnDefinition Width="50" />
 										<ColumnDefinition Width="160" />
 										<ColumnDefinition Width="*" />
 									</Grid.ColumnDefinitions>
@@ -74,110 +74,110 @@
 									<Border Grid.Row="0" Grid.ColumnSpan="3" Background="#0F000000" Padding="10,8">
 										<Grid>
 											<Grid.ColumnDefinitions>
-												<ColumnDefinition Width="70"/>
+												<ColumnDefinition Width="50"/>
 												<ColumnDefinition Width="160"/>
 												<ColumnDefinition Width="*"/>
 											</Grid.ColumnDefinitions>
-											<TextBlock Grid.Column="0" Text="マーク" FontWeight="SemiBold"/>
+											<TextBlock Grid.Column="0" Text="指標" FontWeight="SemiBold"/>
 											<TextBlock Grid.Column="1" Text="状態名" FontWeight="SemiBold"/>
-											<TextBlock Grid.Column="2" Text="意味（どういうときに付くか）" FontWeight="SemiBold"/>
+											<TextBlock Grid.Column="2" Text="説明" FontWeight="SemiBold"/>
 										</Grid>
 									</Border>
 
-									<!-- ✅ UpToDate -->
+									<!-- UpToDate -->
 									<Border Grid.Row="1" Grid.ColumnSpan="3" BorderBrush="#11000000" BorderThickness="0,1,0,0" Padding="10,8">
 										<Grid>
 											<Grid.ColumnDefinitions>
-												<ColumnDefinition Width="70"/>
+												<ColumnDefinition Width="50"/>
 												<ColumnDefinition Width="160"/>
 												<ColumnDefinition Width="*"/>
 											</Grid.ColumnDefinitions>
-											<TextBlock Grid.Column="0" Text="✅" FontSize="14" VerticalAlignment="Center"/>
+											<Ellipse Grid.Column="0" Width="10" Height="10" Fill="LimeGreen" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="1" Text="UpToDate" FontWeight="SemiBold" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="2" TextWrapping="Wrap"
-                                                       Text="DBに記録されている情報と実際のファイル（サイズ・更新日時など）が一致している → 最新状態"/>
+                                                       Text="DBと実ファイルが一致しています。再インデックスは不要です。"/>
 										</Grid>
 									</Border>
 
-									<!-- 🟡 Stale -->
+									<!-- Stale -->
 									<Border Grid.Row="2" Grid.ColumnSpan="3" BorderBrush="#11000000" BorderThickness="0,1,0,0" Padding="10,8">
 										<Grid>
 											<Grid.ColumnDefinitions>
-												<ColumnDefinition Width="70"/>
+												<ColumnDefinition Width="50"/>
 												<ColumnDefinition Width="160"/>
 												<ColumnDefinition Width="*"/>
 											</Grid.ColumnDefinitions>
-											<TextBlock Grid.Column="0" Text="🟡" FontSize="14" VerticalAlignment="Center"/>
+											<Ellipse Grid.Column="0" Width="10" Height="10" Fill="Goldenrod" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="1" Text="Stale" FontWeight="SemiBold" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="2" TextWrapping="Wrap"
-                                                       Text="DBの情報と実物がズレている（更新日時やサイズが変わったなど） → 再インデックス対象"/>
+                                                       Text="DBの情報と実物がズレています（更新日時やサイズの変化など）。再インデックスで一致します。"/>
 										</Grid>
 									</Border>
 
-									<!-- ➕ Unindexed -->
+									<!-- Unindexed -->
 									<Border Grid.Row="3" Grid.ColumnSpan="3" BorderBrush="#11000000" BorderThickness="0,1,0,0" Padding="10,8">
 										<Grid>
 											<Grid.ColumnDefinitions>
-												<ColumnDefinition Width="70"/>
+												<ColumnDefinition Width="50"/>
 												<ColumnDefinition Width="160"/>
 												<ColumnDefinition Width="*"/>
 											</Grid.ColumnDefinitions>
-											<TextBlock Grid.Column="0" Text="➕" FontSize="14" VerticalAlignment="Center"/>
+											<Ellipse Grid.Column="0" Width="10" Height="10" Fill="SteelBlue" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="1" Text="Unindexed" FontWeight="SemiBold" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="2" TextWrapping="Wrap"
-                                                       Text="ファイルシステム上にはあるけど、まだDBに入っていない → 新規追加"/>
+                                                       Text="ファイルは存在しますが、まだDBに登録されていません。インデックス実行で登録されます。"/>
 										</Grid>
 									</Border>
 
-									<!-- ⛔ Orphan -->
+									<!-- Orphan -->
 									<Border Grid.Row="4" Grid.ColumnSpan="3" BorderBrush="#11000000" BorderThickness="0,1,0,0" Padding="10,8">
 										<Grid>
 											<Grid.ColumnDefinitions>
-												<ColumnDefinition Width="70"/>
+												<ColumnDefinition Width="50"/>
 												<ColumnDefinition Width="160"/>
 												<ColumnDefinition Width="*"/>
 											</Grid.ColumnDefinitions>
-											<TextBlock Grid.Column="0" Text="⛔" FontSize="14" VerticalAlignment="Center"/>
+											<Ellipse Grid.Column="0" Width="10" Height="10" Fill="IndianRed" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="1" Text="Orphan" FontWeight="SemiBold" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="2" TextWrapping="Wrap"
-                                                       Text="DBにはあるけど、実際のファイルは見つからない → 削除や移動で消えた可能性"/>
+                                                       Text="DBには記録がありますが、実ファイルが見つかりません。削除／移動された可能性があります。"/>
 										</Grid>
 									</Border>
 
-									<!-- 🔄 Indexing -->
+									<!-- Indexing -->
 									<Border Grid.Row="5" Grid.ColumnSpan="3" BorderBrush="#11000000" BorderThickness="0,1,0,0" Padding="10,8">
 										<Grid>
 											<Grid.ColumnDefinitions>
-												<ColumnDefinition Width="70"/>
+												<ColumnDefinition Width="50"/>
 												<ColumnDefinition Width="160"/>
 												<ColumnDefinition Width="*"/>
 											</Grid.ColumnDefinitions>
-											<TextBlock Grid.Column="0" Text="🔄" FontSize="14" VerticalAlignment="Center"/>
+											<Ellipse Grid.Column="0" Width="10" Height="10" Fill="SlateBlue" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="1" Text="Indexing" FontWeight="SemiBold" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="2" TextWrapping="Wrap"
-                                                       Text="いまインデックス処理中（走査 or DB反映中）"/>
+                                                       Text="いまインデックス処理／鮮度計算を実行中です。"/>
 										</Grid>
 									</Border>
 
-									<!-- ❗ Error -->
+									<!-- Error -->
 									<Border Grid.Row="6" Grid.ColumnSpan="3" BorderBrush="#11000000" BorderThickness="0,1,0,0" Padding="10,8">
 										<Grid>
 											<Grid.ColumnDefinitions>
-												<ColumnDefinition Width="70"/>
+												<ColumnDefinition Width="50"/>
 												<ColumnDefinition Width="160"/>
 												<ColumnDefinition Width="*"/>
 											</Grid.ColumnDefinitions>
-											<TextBlock Grid.Column="0" Text="❗" FontSize="14" VerticalAlignment="Center"/>
+											<Ellipse Grid.Column="0" Width="10" Height="10" Fill="OrangeRed" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="1" Text="Error" FontWeight="SemiBold" VerticalAlignment="Center"/>
 											<TextBlock Grid.Column="2" TextWrapping="Wrap"
-                                                       Text="アクセス拒否（権限なし）、壊れている、IOエラーなどで処理できなかった"/>
+                                                       Text="アクセスできません。権限・パス・ロック状態などを確認してください。"/>
 										</Grid>
 									</Border>
 								</Grid>
 							</Border>
 
 							<TextBlock Margin="0,10,0,0" Foreground="#666" TextWrapping="Wrap">
-								※ マークは一覧表示や進捗UIで使われます。表示仕様は将来変更される場合があります。
+								※ 表示仕様は将来変更される場合があります。
 							</TextBlock>
 						</StackPanel>
 					</Border>

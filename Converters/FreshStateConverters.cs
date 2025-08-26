@@ -4,7 +4,7 @@ using System.Windows.Data;
 
 namespace FileReName.Converters
 {
-    // FreshState → 絵文字
+    // （未使用でも残してOK）FreshState → 絵文字
     public sealed class FreshStateToGlyphConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
@@ -23,18 +23,18 @@ namespace FileReName.Converters
             throw new NotSupportedException();
     }
 
-    // FreshState → ブラシ（完全修飾で曖昧さ回避）
+    // FreshState → 背景色ブラシ
     public sealed class FreshStateToBrushConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
             value?.ToString() switch
             {
-                "UpToDate" => System.Windows.Media.Brushes.LimeGreen,
-                "Stale" => System.Windows.Media.Brushes.Goldenrod,
-                "Unindexed" => System.Windows.Media.Brushes.SteelBlue,
-                "Orphan" => System.Windows.Media.Brushes.IndianRed,
-                "Indexing" => System.Windows.Media.Brushes.SlateBlue,
-                "Error" => System.Windows.Media.Brushes.OrangeRed,
+                "UpToDate" => System.Windows.Media.Brushes.LimeGreen,   // 最新
+                "Stale" => System.Windows.Media.Brushes.Goldenrod,   // 差分あり
+                "Unindexed" => System.Windows.Media.Brushes.SteelBlue,   // 未登録
+                "Orphan" => System.Windows.Media.Brushes.IndianRed,   // 不整合
+                "Indexing" => System.Windows.Media.Brushes.SlateBlue,   // 処理中
+                "Error" => System.Windows.Media.Brushes.OrangeRed,   // エラー
                 _ => System.Windows.Media.Brushes.Gray
             };
 
@@ -42,20 +42,43 @@ namespace FileReName.Converters
             throw new NotSupportedException();
     }
 
-    // FreshState → 説明
+    // ★ 更新：FreshState → 説明（ツールチップ用）
     public sealed class FreshStateToTipConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
             value?.ToString() switch
             {
-                "UpToDate" => "最新の状態です",
-                "Stale" => "内容が更新されています（再Index推奨）",
-                "Unindexed" => "DBに未登録のファイルです（Indexで登録）",
-                "Orphan" => "DBにはあるがファイルが存在しません",
-                "Indexing" => "Index 実行中",
-                "Error" => "アクセスまたは I/O エラー",
-                _ => "不明"
+                // より簡潔で意図が伝わる文言に変更
+                "UpToDate" => "DBと一致しています（再Index不要）",
+                "Stale" => "ファイルが更新済みです。Indexを再実行すると一致します",
+                "Unindexed" => "まだDBに登録されていません。Index実行で登録されます",
+                "Orphan" => "DBにだけ残っています（ファイルは削除/移動済みの可能性）",
+                "Indexing" => "Index/鮮度の計算を実行中です",
+                "Error" => "アクセスできません。権限・パス・ロック状態を確認してください",
+                _ => "不明な状態"
             };
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+            throw new NotSupportedException();
+    }
+
+    // ★ 更新：FreshState → 一覧表示テキスト（マークは使わず短いラベル）
+    public sealed class FreshStateToTextConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            var s = value?.ToString() ?? string.Empty;
+            return s switch
+            {
+                "UpToDate" => "最新",
+                "Stale" => "差分あり",
+                "Unindexed" => "未登録",
+                "Orphan" => "不整合",
+                "Indexing" => "処理中",
+                "Error" => "エラー",
+                _ => s
+            };
+        }
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
             throw new NotSupportedException();
