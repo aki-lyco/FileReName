@@ -74,7 +74,7 @@
 							<Button Content="次へ（設計へ）" Margin="16,4" Padding="16,6" Command="{Binding DecideTargets}"/>
 						</StackPanel>
 
-						<!-- ▼ ここだけ最小追記：見出し右に2ボタン、ListBoxに x:Name と KeyDown -->
+						<!-- ▼ 選択済み一覧 -->
 						<GroupBox Margin="0,24,0,0">
 							<GroupBox.Header>
 								<DockPanel LastChildFill="False">
@@ -99,7 +99,7 @@
 								</ListBox.ContextMenu>
 							</ListBox>
 						</GroupBox>
-						<!-- ▲ 追加ここまで -->
+						<!-- ▲ 選択済み一覧 -->
 					</StackPanel>
 				</Border>
 			</Grid>
@@ -243,18 +243,22 @@
 					</Grid>
 				</Border>
 
-				<!-- 右：テスト＆プレビュー -->
+				<!-- 右：選択対象一覧（置き換え） -->
 				<Border Grid.Column="2" Margin="8" BorderBrush="#DDD" BorderThickness="1" CornerRadius="6" Padding="8">
 					<StackPanel>
-						<TextBlock Text="テスト＆プレビュー" FontWeight="Bold"/>
-						<TextBlock Text="ここに1件のファイルをドロップすると、保存先プレビューを表示します。" Margin="0,4,0,8"/>
-						<Border BorderBrush="#CCC" BorderThickness="1" CornerRadius="6" Padding="12" Background="#F7F7F7"
-                                AllowDrop="True" Drop="OnTestDrop">
-							<StackPanel>
-								<TextBlock Text="ドロップエリア" HorizontalAlignment="Center" Margin="0,8"/>
-								<TextBlock Text="{Binding TestFilePath}" Foreground="Gray" TextWrapping="Wrap"/>
-							</StackPanel>
-						</Border>
+						<TextBlock Text="選択対象（ファイル/フォルダ）" FontWeight="Bold"/>
+						<ListBox x:Name="SelectedListDesign"
+								 ItemsSource="{Binding SelectedTargets}"
+								 Height="360"
+								 SelectionMode="Extended"
+								 KeyDown="SelectedList_KeyDown">
+							<ListBox.ContextMenu>
+								<ContextMenu>
+									<MenuItem Header="選択を削除" Click="OnRemoveSelectedTargets"/>
+									<MenuItem Header="全クリア"   Click="OnClearTargets"/>
+								</ContextMenu>
+							</ListBox.ContextMenu>
+						</ListBox>
 
 						<TextBlock Text="しきい値" Margin="0,12,0,4"/>
 						<Slider Minimum="0" Maximum="1" Value="{Binding AiThreshold}" TickFrequency="0.05" IsSnapToTickEnabled="True"/>
@@ -281,16 +285,12 @@
 
 				<ScrollViewer Margin="12">
 					<StackPanel>
-
-						<!-- 見出し＆保存先 -->
 						<TextBlock Text="DryRunプレビュー" FontSize="18" FontWeight="Bold"/>
 						<TextBlock Margin="0,6,0,10">
 							<Run Text="保存先: "/>
-							<!-- ★ ここも OneWay を明示 -->
 							<Run Text="{Binding BaseDisplay, Mode=OneWay}"/>
 						</TextBlock>
 
-						<!-- 集計 -->
 						<Border BorderBrush="#DDD" BorderThickness="1" CornerRadius="6" Padding="10" Background="#FAFAFA" Margin="0,0,0,10">
 							<StackPanel Orientation="Horizontal">
 								<TextBlock Text="{Binding Plan.Stats.CreateCount, StringFormat=作成フォルダ: {0}}" Margin="0,0,16,0"/>
@@ -300,7 +300,6 @@
 							</StackPanel>
 						</Border>
 
-						<!-- 作成フォルダ一覧 -->
 						<GroupBox Header="作成フォルダ" Margin="0,0,0,10">
 							<ItemsControl ItemsSource="{Binding Plan.CreateDirs}">
 								<ItemsControl.ItemTemplate>
@@ -311,7 +310,6 @@
 							</ItemsControl>
 						</GroupBox>
 
-						<!-- 移動プラン一覧 -->
 						<GroupBox Header="移動プラン">
 							<DataGrid ItemsSource="{Binding Plan.Moves}"
                                       AutoGenerateColumns="False"
@@ -327,7 +325,6 @@
 							</DataGrid>
 						</GroupBox>
 
-						<!-- 操作ボタン -->
 						<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
 							<Button Content="テストやり直し" Command="{Binding RunDryRun}" Margin="0,0,8,0"/>
 							<Button Content="適用を実行"     Command="{Binding ApplyPlan}" Margin="0,0,8,0"/>
