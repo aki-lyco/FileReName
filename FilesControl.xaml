@@ -9,14 +9,17 @@
              d:DesignHeight="600" d:DesignWidth="1000">
 
 	<UserControl.Resources>
+		<!-- パンくず -->
 		<local:PathToBreadcrumbConverter x:Key="PathToBreadcrumb" />
 
+		<!-- DataGrid の行スタイル -->
 		<Style TargetType="{x:Type DataGridRow}">
 			<Setter Property="Padding" Value="10,2"/>
 			<Setter Property="BorderBrush" Value="#EEE"/>
 			<Setter Property="BorderThickness" Value="0,0,0,1"/>
 		</Style>
 
+		<!-- 行右クリックメニュー -->
 		<ContextMenu x:Key="FilesRowMenu">
 			<MenuItem Header="開く" Tag="OpenFile" CommandParameter="{Binding FullPath}" />
 			<MenuItem Header="場所を開く" Tag="OpenLocation" CommandParameter="{Binding FullPath}" />
@@ -27,6 +30,7 @@
 			<MenuItem Header="ゴミ箱に移動" Tag="DeleteFile" CommandParameter="{Binding FullPath}" />
 		</ContextMenu>
 
+		<!-- フォルダツリーの右クリックメニュー -->
 		<ContextMenu x:Key="FolderTreeMenu">
 			<MenuItem Header="ゴミ箱に移動" Tag="DeleteFolder" CommandParameter="{Binding FullPath}" />
 		</ContextMenu>
@@ -89,7 +93,7 @@
 			</ScrollViewer>
 		</Border>
 
-		<!-- 本文（左：ツリー / 右：ファイル一覧） -->
+		<!-- 本文 -->
 		<Grid Grid.Row="2">
 			<Grid.ColumnDefinitions>
 				<ColumnDefinition Width="280"/>
@@ -123,7 +127,6 @@
 
 			<!-- ファイル一覧 -->
 			<Grid Grid.Column="2">
-				<!-- ItemsSource のコメントはタグの外に置く -->
 				<DataGrid x:Name="FilesGrid"
                           ItemsSource="{Binding Rows}"
                           AutoGenerateColumns="False"
@@ -141,6 +144,22 @@
 						</Style>
 					</DataGrid.RowStyle>
 					<DataGrid.Columns>
+						<!-- 左端チェック列（ヘッダーで全選択/全解除） -->
+						<DataGridTemplateColumn Width="40" IsReadOnly="False">
+							<DataGridTemplateColumn.HeaderTemplate>
+								<DataTemplate>
+									<CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Click="OnHeaderCheckAllClick"/>
+								</DataTemplate>
+							</DataGridTemplateColumn.HeaderTemplate>
+							<DataGridTemplateColumn.CellTemplate>
+								<DataTemplate>
+									<CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
+								</DataTemplate>
+							</DataGridTemplateColumn.CellTemplate>
+						</DataGridTemplateColumn>
+
 						<DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="*"/>
 						<DataGridTextColumn Header="拡張子" Binding="{Binding Extension}" Width="120"/>
 						<DataGridTextColumn Header="サイズ" Binding="{Binding Size, StringFormat={}{0:N0}}" Width="140"/>
