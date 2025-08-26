@@ -630,18 +630,32 @@ namespace Explore
             }
         }
 
+        // 新規作成メニュー「フォルダー」
         private async void OnNewFolderClick(object? sender, RoutedEventArgs e)
         {
             var dir = GetTargetDirectory();
             if (dir == null) return;
+
             var baseName = "新しいフォルダー";
             var name = baseName;
             int i = 2;
             while (Directory.Exists(Path.Combine(dir, name)))
                 name = $"{baseName} ({i++})";
-            Directory.CreateDirectory(Path.Combine(dir, name));
-            await RefreshCurrentFolderViewAsync();
+
+            var created = Path.Combine(dir, name);
+            Directory.CreateDirectory(created);
+
+            // ← 追加：左ツリーを更新し、新フォルダを表示
+            await ForceRefreshFolderNodeAsync(dir);   // 親ノードの子一覧を作り直す
+            await TryExpandPathAsync(created);        // 作ったフォルダをツリーに展開
+
+            // ← 追加：右ペインも新フォルダに移動（中身が見える）
+            await NavigateAndFillAsync(created);
+
+            // ※「作成後にそのまま親フォルダに留まりたい」場合は、上の2行のうち
+            //   NavigateAndFillAsync(created) をコメントアウトしてください。
         }
+
 
         private async void OnNewTextClick(object? sender, RoutedEventArgs e)
             => await CreateTextLikeAsync("新しいテキスト ドキュメント.txt", "");
