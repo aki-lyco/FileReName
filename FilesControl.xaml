@@ -50,10 +50,102 @@
 			</StackPanel>
 		</HierarchicalDataTemplate>
 
-		<!-- 鮮度表示用（FreshStateConverters.cs を利用） -->
+		<!-- 鮮度表示用 -->
 		<conv:FreshStateToBrushConverter x:Key="FreshBrush"/>
 		<conv:FreshStateToTextConverter  x:Key="FreshText"/>
 		<conv:FreshStateToTipConverter   x:Key="FreshTip"/>
+
+		<!-- ===== Toolbar modern styles ===== -->
+		<!-- Colors -->
+		<SolidColorBrush x:Key="Tb.Fg" Color="#222" />
+		<SolidColorBrush x:Key="Tb.Bg" Color="#F6F7F9" />
+		<SolidColorBrush x:Key="Tb.BgHover" Color="#EEF1F6" />
+		<SolidColorBrush x:Key="Tb.BgPressed" Color="#E5E9F1" />
+		<SolidColorBrush x:Key="Tb.Border" Color="#D0D5DD" />
+		<SolidColorBrush x:Key="Tb.BorderHover" Color="#B8BEC9" />
+		<SolidColorBrush x:Key="Tb.PrimaryBg" Color="#E7F0FF" />
+		<SolidColorBrush x:Key="Tb.PrimaryBorder" Color="#3B82F6" />
+		<SolidColorBrush x:Key="Tb.PrimaryFg" Color="#0B5ED7" />
+
+		<!-- 通常ボタン -->
+		<Style x:Key="ToolbarButton" TargetType="Button">
+			<Setter Property="Foreground" Value="{StaticResource Tb.Fg}"/>
+			<Setter Property="Background" Value="{StaticResource Tb.Bg}"/>
+			<Setter Property="BorderBrush" Value="{StaticResource Tb.Border}"/>
+			<Setter Property="BorderThickness" Value="1"/>
+			<Setter Property="Padding" Value="12,6"/>
+			<Setter Property="FontSize" Value="13"/>
+			<Setter Property="FontWeight" Value="SemiBold"/>
+			<Setter Property="MinWidth" Value="96"/>
+			<Setter Property="Height" Value="32"/>
+			<Setter Property="SnapsToDevicePixels" Value="True"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="Button">
+						<Border x:Name="bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+							<ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="bd" Property="Background" Value="{StaticResource Tb.BgHover}"/>
+								<Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Tb.BorderHover}"/>
+							</Trigger>
+							<Trigger Property="IsPressed" Value="True">
+								<Setter TargetName="bd" Property="Background" Value="{StaticResource Tb.BgPressed}"/>
+							</Trigger>
+							<Trigger Property="IsEnabled" Value="False">
+								<Setter Property="Opacity" Value="0.5"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+		<!-- アイコンだけの小型ボタン -->
+		<Style x:Key="ToolbarIconButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+			<Setter Property="MinWidth" Value="40"/>
+			<Setter Property="Width" Value="40"/>
+			<Setter Property="Padding" Value="0"/>
+		</Style>
+
+		<!-- トグルボタン（必要になったら使用） -->
+		<Style x:Key="ToolbarToggle" TargetType="ToggleButton" BasedOn="{StaticResource ToolbarButton}">
+			<Setter Property="MinWidth" Value="0"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="ToggleButton">
+						<Border x:Name="bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+							<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsChecked" Value="True">
+								<Setter TargetName="bd" Property="Background" Value="{StaticResource Tb.PrimaryBg}"/>
+								<Setter Property="Foreground" Value="{StaticResource Tb.PrimaryFg}"/>
+								<Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Tb.PrimaryBorder}"/>
+							</Trigger>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Tb.BorderHover}"/>
+							</Trigger>
+							<Trigger Property="IsEnabled" Value="False">
+								<Setter Property="Opacity" Value="0.5"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+		<!-- ===== /Toolbar modern styles ===== -->
 	</UserControl.Resources>
 
 	<Grid>
@@ -66,13 +158,30 @@
 		<!-- ツールバー -->
 		<Border Grid.Row="0" Background="#F6F7F9" Padding="8,8" BorderBrush="#E6E6E6" BorderThickness="0,0,0,1">
 			<StackPanel Orientation="Horizontal">
-				<Button x:Name="BtnNewCreate" Content="新規作成" Padding="12,6" Margin="0,0,8,0"/>
+				<Button x:Name="BtnNewCreate" Content="新規作成" Margin="0,0,8,0"
+                        Style="{StaticResource ToolbarButton}"/>
 				<Separator Width="8"/>
-				<Button x:Name="BtnIndex" Content="このフォルダを同期" Padding="12,6" Margin="0,0,8,0"/>
-				<Button x:Name="BtnIndexDiff" Content="差分のみIndex" Padding="12,6" Margin="0,0,8,0"/>
-				<Button x:Name="BtnRecycle" Content="ゴミ箱へ移動" Padding="12,6" Margin="0,0,8,0"/>
+				<Button x:Name="BtnIndex" Content="このフォルダを同期" Margin="0,0,8,0"
+                        Style="{StaticResource ToolbarButton}"/>
+				<Button x:Name="BtnIndexDiff" Content="差分のみIndex" Margin="0,0,8,0"
+                        Style="{StaticResource ToolbarButton}"/>
+
+				<!-- ★ ゴミ箱へ移動：アイコン -->
+				<Button x:Name="BtnRecycle"
+                        Style="{StaticResource ToolbarIconButton}"
+                        Margin="0,0,8,0"
+                        ToolTip="ゴミ箱へ移動"
+                        AutomationProperties.Name="ゴミ箱へ移動">
+					<!-- Segoe MDL2 Assets の Delete(ごみ箱) アイコン -->
+					<TextBlock FontFamily="Segoe MDL2 Assets"
+                               Text="&#xE74D;"
+                               FontSize="16"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+				</Button>
+
 				<TextBlock Text="{Binding IndexStatusText}" Margin="16,0,0,0" VerticalAlignment="Center" Foreground="#666"/>
-				<TextBlock Text="{Binding FreshnessPercent, StringFormat=鮮度\ {0:F0}%}" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="#666"/>
+				<TextBlock Text="{Binding FreshnessPercent, StringFormat=鮮度 {0:F0}%}" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="#666"/>
 			</StackPanel>
 		</Border>
 
@@ -188,7 +297,7 @@
 						<DataGridTextColumn Header="拡張子" Binding="{Binding Extension}" Width="120"/>
 						<DataGridTextColumn Header="サイズ" Binding="{Binding Size, StringFormat={}{0:N0}}" Width="140"/>
 
-						<!-- ★ 変更: 鮮度（小さなカラードット + 淡いテキスト） -->
+						<!-- 鮮度 -->
 						<DataGridTemplateColumn Header="鮮度" Width="110" IsReadOnly="True">
 							<DataGridTemplateColumn.CellTemplate>
 								<DataTemplate>
