@@ -2,10 +2,9 @@
 using System.Linq;
 using System.Windows;
 using Explore.Build;
-// using Microsoft.Win32; // ← 衝突回避のため未使用
-using WinForms = System.Windows.Forms;          // Forms はエイリアスで使用
-using Win32 = Microsoft.Win32;                  // OpenFileDialog 用エイリアス
-using System.Collections;                       // ★ 追加：IList 用
+using WinForms = System.Windows.Forms;  // FolderBrowserDialog
+using Win32 = Microsoft.Win32;         // OpenFileDialog
+using System.Collections;              // IList
 
 namespace Explore
 {
@@ -29,9 +28,11 @@ namespace Explore
 
         private string? PickFolder()
         {
-            using var dlg = new WinForms.FolderBrowserDialog();
-            dlg.Description = "保存先ベースフォルダを選択";
-            dlg.UseDescriptionForTitle = true;
+            using var dlg = new WinForms.FolderBrowserDialog
+            {
+                Description = "保存先ベースフォルダを選択",
+                UseDescriptionForTitle = true
+            };
             var res = dlg.ShowDialog();
             if (res == WinForms.DialogResult.OK && !string.IsNullOrWhiteSpace(dlg.SelectedPath))
                 return dlg.SelectedPath;
@@ -40,7 +41,7 @@ namespace Explore
 
         private (string[] files, string? folder)? PickFilesOrFolder()
         {
-            // 未使用（必要なら実装）
+            // 必要になったら実装
             return null;
         }
 
@@ -63,16 +64,13 @@ namespace Explore
         private void OnAddFolderClick(object sender, RoutedEventArgs e)
         {
             var path = PickFolder();
-            if (!string.IsNullOrWhiteSpace(path))
-            {
-                if (!_vm.SelectedTargets.Contains(path))
-                    _vm.SelectedTargets.Add(path);
-            }
+            if (!string.IsNullOrWhiteSpace(path) && !_vm.SelectedTargets.Contains(path))
+                _vm.SelectedTargets.Add(path);
         }
 
         private void Tree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
         {
-            _vm.SelectedCategory = e.NewValue as Explore.Build.CategoryNode;
+            _vm.SelectedCategory = e.NewValue as CategoryNode;
         }
 
         private void OnTestDrop(object sender, System.Windows.DragEventArgs e)
@@ -83,17 +81,18 @@ namespace Explore
                 if (paths != null && paths.Length > 0)
                 {
                     _vm.TestFilePath = paths[0];
-                    // 右パネルはダミー（保存先プレビューなどはFで実装）
+                    // 右パネルはダミー（保存先プレビューなどはVM側で実装予定）
                 }
             }
         }
 
-        // ===== ここから追加分（ListBox操作） =====
+        // ===== ListBox（SelectedList）操作 =====
 
-        // 選択を削除（ListBox: SelectedList の選択項目だけ除去）
+        // 選択を削除
         private void OnRemoveSelectedTargets(object sender, RoutedEventArgs e)
         {
             if (SelectedList?.ItemsSource is not IList src) return;
+
             var toRemove = new System.Collections.Generic.List<object>();
             foreach (var it in SelectedList.SelectedItems)
                 toRemove.Add(it);
@@ -107,7 +106,7 @@ namespace Explore
             if (SelectedList?.ItemsSource is IList src) src.Clear();
         }
 
-        // Delete キーで「選択を削除」  ※WPF型を完全修飾して曖昧さを回避
+        // Delete キーで「選択を削除」
         private void SelectedList_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
         {
             if (e.Key == System.Windows.Input.Key.Delete)
@@ -116,6 +115,5 @@ namespace Explore
                 e.Handled = true;
             }
         }
-        // ===== 追加ここまで =====
     }
 }

@@ -26,7 +26,6 @@ using WpfDataObject = System.Windows.DataObject;
 using WpfDataFormats = System.Windows.DataFormats;
 using WpfDragDrop = System.Windows.DragDrop;
 using WpfDragDropEffects = System.Windows.DragDropEffects;
-// ↓ 追加：あいまいさ回避
 using WpfBinding = System.Windows.Data.Binding;
 using WpfButton = System.Windows.Controls.Button;
 
@@ -35,44 +34,65 @@ namespace Explore
     // ===== パンくず用モデル / コンバータ =====
     public record BreadcrumbItem(string Name, string FullPath, bool IsLast);
 
+    /// <summary>
+    /// パス → パンくずの配列
+    /// ドライブ記法 "C:" を必ず "C:\" に正規化してから処理する。
+    /// これにより C ドライブ選択時に「現在ディレクトリ」に解決されるのを防ぐ。
+    /// </summary>
     public sealed class PathToBreadcrumbConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
-            var path = value as string;
-            if (string.IsNullOrWhiteSpace(path)) return Array.Empty<BreadcrumbItem>();
+            var raw0 = value as string;
+            if (string.IsNullOrWhiteSpace(raw0)) return Array.Empty<BreadcrumbItem>();
 
-            path = Path.GetFullPath(path.TrimEnd('\\'));
-            var items = new List<BreadcrumbItem>();
+            // ★ "C:" を "C:\" に強制正規化（ここが肝）
+            var raw = raw0.Trim();
+            if (raw.Length == 2 && raw[1] == ':' && char.IsLetter(raw[0]))
+                raw += "\\";
 
-            var root = Path.GetPathRoot(path) ?? "";
-            if (!string.IsNullOrEmpty(root))
-                items.Add(new BreadcrumbItem(root.TrimEnd('\\'), root, false));
+            // UNC なども含めてフルパス化（末尾 \ は維持してよい）
+            string path;
+            try { path = Path.GetFullPath(raw); }
+            catch { path = raw; }
 
-            var remain = path.Substring(root.Length).Trim('\\');
-            if (remain.Length > 0)
+            // ルート（例: "C:\" / "\\server\share\"）
+            var root = Path.GetPathRoot(path) ?? string.Empty;
+            if (root.Length == 2 && root[1] == ':') root += "\\"; // "C:" → "C:\"
+
+            // 表示名（"C:\" はそのまま、UNC は末尾 \ を消して見せる）
+            var rootDisplay = root.EndsWith("\\")
+                ? (root.TrimEnd('\\').EndsWith(":") ? (root.TrimEnd('\\') + "\\") : root.TrimEnd('\\'))
+                : root;
+
+            var items = new List<BreadcrumbItem>
             {
-                var parts = remain.Split('\\', StringSplitOptions.RemoveEmptyEntries);
-                var acc = root;
-                for (int i = 0; i < parts.Length; i++)
-                {
-                    var seg = parts[i];
-                    acc = Path.Combine(acc, seg);
-                    items.Add(new BreadcrumbItem(seg, acc, i == parts.Length - 1));
-                }
-                if (items.Count > 0)
-                    items[0] = items[0] with { IsLast = items.Count == 1 };
-            }
-            else
+                new BreadcrumbItem(rootDisplay, root, false)
+            };
+
+            // ルートのみなら終わり
+            var remain = path.Length >= root.Length ? path.Substring(root.Length).Trim('\\') : string.Empty;
+            if (remain.Length == 0)
             {
-                if (items.Count > 0)
-                    items[0] = items[0] with { IsLast = true };
+                items[0] = items[0] with { IsLast = true };
+                return items.ToArray();
             }
+
+            // それ以外は積み上げ
+            var acc = root; // 例: "C:\"
+            var parts = remain.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length; i++)
+            {
+                acc = Path.Combine(acc, parts[i]);
+                items.Add(new BreadcrumbItem(parts[i], acc, i == parts.Length - 1));
+            }
+
             return items;
         }
 
+        // WPF の Binding を明示（曖昧さ回避）
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-            => WpfBinding.DoNothing; // ← 変更：WPF Binding を明示
+            => WpfBinding.DoNothing;
     }
     // ==========================================
 
@@ -537,7 +557,6 @@ namespace Explore
 
         private async Task DeleteRecordsUnderAsync(string dir, CancellationToken ct)
         {
-            // LIKE プレフィックスを安全にエスケープ
             static string EscapeLike(string s) => s
                 .Replace("\\", "\\\\")
                 .Replace("%", "\\%")
@@ -722,12 +741,9 @@ namespace Explore
             var created = Path.Combine(dir, name);
             Directory.CreateDirectory(created);
 
-            // ← 追加：左ツリーを更新し、新フォルダを表示
             await ForceRefreshFolderNodeAsync(dir);   // 親ノードの子一覧を作り直す
             await TryExpandPathAsync(created);        // 作ったフォルダをツリーに展開
-
-            // ← 追加：右ペインも新フォルダに移動（中身が見える）
-            await NavigateAndFillAsync(created);
+            await NavigateAndFillAsync(created);      // 右ペインも新フォルダへ
         }
 
         private async void OnNewTextClick(object? sender, RoutedEventArgs e)
@@ -1029,7 +1045,6 @@ namespace Explore
 
             foreach (var src in sources)
             {
-                // ★ 移動後は src が存在しなくなるので Exists チェックはしない
                 var p = Path.GetDirectoryName(src?.TrimEnd(Path.DirectorySeparatorChar) ?? "");
                 if (!string.IsNullOrWhiteSpace(p)) parents.Add(p);
             }
@@ -1130,42 +1145,33 @@ namespace Explore
             var name = Path.GetFileName(src);
             var destPath = Path.Combine(destDir, name);
 
-            // 同じ完全パスならスキップ
             if (string.Equals(src, destPath, StringComparison.OrdinalIgnoreCase)) return;
 
-            // 上書き回避（filename (1).ext …）
             destPath = EnsureUniqueFilePath(destPath);
 
-            // 旧キーは移動前に取得（別ボリューム移動で変化しうる）
             var oldKey = FileKeyUtil.GetStableKey(src);
 
-            // 実移動
             SafeFileMove(src, destPath);
 
-            // DBを新パスでUpsert
             var rec = BuildRecordFromFs(destPath);
             await _db.UpsertFileAsync(rec);
 
-            // キーが変わった（別ボリュームなど）場合は旧キーの残骸を掃除
             var newKey = rec.FileKey;
             if (!string.Equals(oldKey, newKey, StringComparison.Ordinal))
                 await DeleteByFileKeyAsync(oldKey, CancellationToken.None);
 
-            // moves ログ
             await LogMoveAsync(oldKey, src, destPath, CancellationToken.None);
         }
 
         // 単一フォルダ移動（自己配下への移動は呼び出し前チェック済）
         private async Task MoveOneDirectoryAsync(string srcDir, string destParent)
         {
-            // ルート・ドライブ直下などは移動不可
             if (string.IsNullOrWhiteSpace(Path.GetDirectoryName(srcDir)))
                 throw new InvalidOperationException("このフォルダーは移動できません。");
 
             var finalDest = Path.Combine(destParent, Path.GetFileName(srcDir.TrimEnd(Path.DirectorySeparatorChar)));
             finalDest = EnsureUniqueDirectoryPath(finalDest);
 
-            // 移動前に配下ファイルを列挙（旧パス→新パス、旧キー）を記録
             var oldFiles = EnumerateAllFiles(srcDir).ToList();
             var mapping = new List<(string oldPath, string newPath, string oldKey)>(oldFiles.Count);
             foreach (var oldPath in oldFiles)
@@ -1178,30 +1184,25 @@ namespace Explore
             var sameVolume = string.Equals(Path.GetPathRoot(srcDir), Path.GetPathRoot(destParent), StringComparison.OrdinalIgnoreCase);
             if (sameVolume)
             {
-                // 同一ボリュームは丸ごとMove
                 Directory.Move(srcDir, finalDest);
             }
             else
             {
-                // 異なるボリュームはコピー → 元削除
                 await CopyDirectoryAsync(srcDir, finalDest);
                 try { Directory.Delete(srcDir, recursive: true); }
                 catch (Exception ex)
                 {
-                    // コピー済みなら致命ではないが通知
                     WpfMessageBox.Show($"元フォルダの削除に失敗: {ex.Message}", "フォルダ移動", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             }
 
-            // DB更新＆ログ（各ファイル単位）
             foreach (var (oldPath, newPath, oldKey) in mapping)
             {
-                if (!File.Exists(newPath)) continue; // コピー/Moveに失敗したファイルはスキップ
+                if (!File.Exists(newPath)) continue;
 
                 var rec = BuildRecordFromFs(newPath);
                 await _db.UpsertFileAsync(rec);
 
-                // キー変化があれば旧キー掃除
                 if (!string.Equals(oldKey, rec.FileKey, StringComparison.Ordinal))
                     await DeleteByFileKeyAsync(oldKey, CancellationToken.None);
 
@@ -1209,7 +1210,6 @@ namespace Explore
             }
         }
 
-        // === ファイル／フォルダ move 実体＆補助 ===
         private static string EnsureUniqueFilePath(string destPath)
         {
             if (!File.Exists(destPath)) return destPath;
@@ -1246,7 +1246,6 @@ namespace Explore
             }
             else
             {
-                // 異ボリュームはコピー→元削除
                 Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
                 File.Copy(src, dest, overwrite: false);
                 File.Delete(src);
@@ -1369,7 +1368,7 @@ VALUES($k,$o,$n,'move',NULL,$t)";
         // ===== パンくず クリック =====
         private async void OnBreadcrumbClick(object sender, RoutedEventArgs e)
         {
-            if (sender is WpfButton b && b.Tag is string p && Directory.Exists(p)) // ← 変更：WpfButton で判定
+            if (sender is WpfButton b && b.Tag is string p && Directory.Exists(p))
                 await NavigateAndFillAsync(p);
         }
 
