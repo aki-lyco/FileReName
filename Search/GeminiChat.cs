@@ -20,7 +20,7 @@ namespace Explore.Search
         public async Task<string> AskJsonAsync(string prompt, CancellationToken ct = default)
         {
             var req = new HttpRequestMessage(HttpMethod.Post,
-                $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={_apiKey}");
+                $"https://generativelanguage.googleapis.com/v1beta/models/models/gemini-1.5-flash:generateContent?key={_apiKey}");
 
             var body = new
             {

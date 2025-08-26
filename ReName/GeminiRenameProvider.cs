@@ -7,6 +7,7 @@ using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Explore
@@ -19,7 +20,7 @@ namespace Explore
     public sealed class GeminiRenameProvider : IRenameAIProvider
     {
         private readonly string _apiKey;
-        private readonly string _model;
+        private readonly string _model; // 例: "gemini-1.5-flash" or "models/gemini-1.5-flash"
         private readonly HttpClient _http = new HttpClient();
         private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
         {
@@ -67,18 +68,27 @@ namespace Explore
             _model = string.IsNullOrWhiteSpace(model) ? "gemini-1.5-flash" : model;
         }
 
+        private string NormalizeModelForPath()
+        {
+            // API のパスは /v1beta/models/{model}:... なので、{model} は "gemini-..." 形式に正規化しておく
+            return _model.StartsWith("models/", StringComparison.OrdinalIgnoreCase)
+                ? _model.Substring("models/".Length)
+                : _model;
+        }
+
         // 疎通確認
         public async Task<bool> PingAsync()
         {
             try
             {
-                var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
+                var modelForPath = NormalizeModelForPath();
+                var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelForPath}:generateContent?key={_apiKey}";
                 using var req = new HttpRequestMessage(HttpMethod.Post, url);
                 var payload = new
                 {
                     contents = new object[]
                     {
-                        new { parts = new object[]{ new { text = "ping" } } }
+                        new { role = "user", parts = new object[]{ new { text = "ping" } } }
                     }
                 };
                 var json = JsonSerializer.Serialize(payload, _jsonOptions);
@@ -87,8 +97,9 @@ namespace Explore
                 using var res = await _http.SendAsync(req);
                 return res.IsSuccessStatusCode;
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine("Gemini Ping failed: " + ex);
                 return false;
             }
         }
@@ -118,8 +129,9 @@ namespace Explore
 
                     item.SuggestedName = name;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    System.Diagnostics.Debug.WriteLine($"SuggestAsync failed: {ex.Message}");
                     // 続行
                 }
             }
@@ -132,37 +144,55 @@ namespace Explore
             var base64 = Convert.ToBase64String(bytes);
             var systemPrompt = BuildImagePrompt(item, exifText);
 
-            var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
-            using var req = new HttpRequestMessage(HttpMethod.Post, url);
+            var modelForPath = NormalizeModelForPath();
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelForPath}:generateContent?key={_apiKey}";
 
-            var payload = new
+            // 軽いリトライ（200/400/800ms）
+            var delay = 200;
+            for (int attempt = 1; attempt <= 3; attempt++)
             {
-                contents = new object[]
+                try
                 {
-                    new
+                    using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                    var payload = new
                     {
-                        parts = new object[]
+                        contents = new object[]
                         {
-                            new { text = systemPrompt },
-                            new { inline_data = new { mime_type = mime, data = base64 } }
-                        }
-                    }
-                },
-                generationConfig = new { temperature = 0.4, topP = 0.9, maxOutputTokens = 256 }
-            };
+                            new
+                            {
+                                role = "user",
+                                parts = new object[]
+                                {
+                                    new { text = systemPrompt },
+                                    new { inline_data = new { mime_type = mime, data = base64 } }
+                                }
+                            }
+                        },
+                        generationConfig = new { temperature = 0.4, topP = 0.9, maxOutputTokens = 256 }
+                    };
 
-            var json = JsonSerializer.Serialize(payload, _jsonOptions);
-            req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                    var json = JsonSerializer.Serialize(payload, _jsonOptions);
+                    req.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            using var res = await _http.SendAsync(req);
-            res.EnsureSuccessStatusCode();
-            var body = await res.Content.ReadAsStringAsync();
+                    using var res = await _http.SendAsync(req);
+                    var body = await res.Content.ReadAsStringAsync();
+                    res.EnsureSuccessStatusCode();
 
-            using var doc = JsonDocument.Parse(body);
-            var root = doc.RootElement;
-            var cand0 = root.GetProperty("candidates")[0];
-            var text = cand0.GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
-            return text;
+                    using var doc = JsonDocument.Parse(body);
+                    var root = doc.RootElement;
+                    var cand0 = root.GetProperty("candidates")[0];
+                    var text = cand0.GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+                    return text;
+                }
+                catch (Exception ex) when (attempt < 3)
+                {
+                    System.Diagnostics.Debug.WriteLine($"AskGeminiForImageAsync retry {attempt}: {ex.Message}");
+                    await Task.Delay(delay);
+                    delay *= 2;
+                }
+            }
+
+            return "";
         }
 
         private static (string mime, byte[] bytes) PrepareImageBytes(string path, int maxDim = 1280, long quality = 85L)
@@ -322,27 +352,45 @@ namespace Explore
 
         private async Task<string> CallGeminiAsync(string prompt)
         {
-            var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
-            using var req = new HttpRequestMessage(HttpMethod.Post, url);
-            var payload = new
-            {
-                contents = new object[]
-                {
-                    new { parts = new object[]{ new { text = prompt } } }
-                },
-                generationConfig = new { temperature = 0.5, topP = 0.9, maxOutputTokens = 256 }
-            };
-            var json = JsonSerializer.Serialize(payload, _jsonOptions);
-            req.Content = new StringContent(json, Encoding.UTF8, "application/json");
-            using var res = await _http.SendAsync(req);
-            res.EnsureSuccessStatusCode();
-            var body = await res.Content.ReadAsStringAsync();
+            var modelForPath = NormalizeModelForPath();
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelForPath}:generateContent?key={_apiKey}";
 
-            using var doc = JsonDocument.Parse(body);
-            var root = doc.RootElement;
-            var cand0 = root.GetProperty("candidates")[0];
-            var text = cand0.GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
-            return text;
+            // 軽いリトライ（200/400/800ms）
+            var delay = 200;
+            for (int attempt = 1; attempt <= 3; attempt++)
+            {
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                    var payload = new
+                    {
+                        contents = new object[]
+                        {
+                            new { role = "user", parts = new object[]{ new { text = prompt } } }
+                        },
+                        generationConfig = new { temperature = 0.5, topP = 0.9, maxOutputTokens = 256 }
+                    };
+                    var json = JsonSerializer.Serialize(payload, _jsonOptions);
+                    req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                    using var res = await _http.SendAsync(req);
+                    var body = await res.Content.ReadAsStringAsync();
+                    res.EnsureSuccessStatusCode();
+
+                    using var doc = JsonDocument.Parse(body);
+                    var root = doc.RootElement;
+                    var cand0 = root.GetProperty("candidates")[0];
+                    var text = cand0.GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+                    return text;
+                }
+                catch (Exception ex) when (attempt < 3)
+                {
+                    System.Diagnostics.Debug.WriteLine($"CallGeminiAsync retry {attempt}: {ex.Message}");
+                    await Task.Delay(delay);
+                    delay *= 2;
+                }
+            }
+
+            return "";
         }
 
         private static string ExtractNameFromReply(string reply)

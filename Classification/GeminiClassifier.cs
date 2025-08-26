@@ -16,13 +16,26 @@ namespace Explore.Build
     {
         private readonly HttpClient _http = new();
         private readonly string _apiKey;
+        private readonly string _model; // 例: "gemini-1.5-flash" or "models/gemini-1.5-flash"
 
-        public GeminiClassifier(string? apiKey = null)
+        public GeminiClassifier(string? apiKey = null, string? model = null)
         {
-            // 優先順: 引数 > 環境変数 > 既定（空）
+            // 優先順: 引数 > 環境変数 > 既定（空/既定モデル）
             _apiKey = apiKey
                    ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")
                    ?? "";
+
+            _model = string.IsNullOrWhiteSpace(model)
+                ? (Environment.GetEnvironmentVariable("GEMINI_MODEL") ?? "gemini-1.5-flash")
+                : model!;
+        }
+
+        private string NormalizeModelForPath()
+        {
+            // API のパスは /v1beta/models/{model}:... なので、{model} は "gemini-..." 形式に正規化
+            return _model.StartsWith("models/", StringComparison.OrdinalIgnoreCase)
+                ? _model.Substring("models/".Length)
+                : _model;
         }
 
         public async Task<AiClassifyResult> ClassifyAsync(AiClassifyRequest req, CancellationToken ct)
@@ -64,8 +77,9 @@ namespace Explore.Build
                     var result = Parse(json, req);
                     return result;
                 }
-                catch when (attempt < 3)
+                catch (Exception ex) when (attempt < 3)
                 {
+                    System.Diagnostics.Debug.WriteLine($"GeminiClassifier retry {attempt}: {ex.Message}");
                     await Task.Delay(delay, ct);
                     delay *= 2;
                 }
@@ -135,8 +149,8 @@ namespace Explore.Build
 
         private async Task<string> CallGeminiAsync(string system, string user, string? imagePath, string? imageHint, CancellationToken ct)
         {
-            using var req = new HttpRequestMessage(HttpMethod.Post,
-                $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={_apiKey}");
+            var modelForPath = NormalizeModelForPath();
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelForPath}:generateContent?key={_apiKey}";
 
             // parts 構築（テキスト + 画像(任意) + ヒント(任意)）
             var parts = new System.Collections.Generic.List<object> { new { text = user } };
@@ -160,6 +174,8 @@ namespace Explore.Build
                 }
             }
 
+            using var req = new HttpRequestMessage(HttpMethod.Post, url);
+
             var payload = new
             {
                 contents = new[] { new { role = "user", parts = parts.ToArray() } },
@@ -170,8 +186,8 @@ namespace Explore.Build
             req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
             using var res = await _http.SendAsync(req, ct);
-            res.EnsureSuccessStatusCode();
             var json = await res.Content.ReadAsStringAsync(); // ct 付きがない環境もあるため
+            res.EnsureSuccessStatusCode();
 
             return json;
         }

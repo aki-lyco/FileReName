@@ -16,8 +16,16 @@ using System.Windows.Media;
 using Explore.FileSystem;
 using Explore.Indexing;
 using Microsoft.Data.Sqlite;
+
+// ====== 追加: WPF型を明示するためのエイリアス ======
 using WpfMessageBox = System.Windows.MessageBox;
-using Input = System.Windows.Input;
+using WpfInput = System.Windows.Input;
+using WpfPoint = System.Windows.Point;
+using WpfDragEventArgs = System.Windows.DragEventArgs;
+using WpfDataObject = System.Windows.DataObject;
+using WpfDataFormats = System.Windows.DataFormats;
+using WpfDragDrop = System.Windows.DragDrop;
+using WpfDragDropEffects = System.Windows.DragDropEffects;
 
 namespace Explore
 {
@@ -60,6 +68,10 @@ namespace Explore
         private void Raise([CallerMemberName] string? n = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
 
+        // ==== D&D 用フィールド ====
+        private WpfPoint _dragStart;
+        private DependencyObject? _dragOriginVisual;
+
         public FilesControl()
         {
             InitializeComponent();
@@ -83,6 +95,13 @@ namespace Explore
             FilesGrid.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnFilesGridMenuClick));
             FolderTree.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnFolderTreeMenuClick));
 
+            // ★★ 追加：ドラッグ＆ドロップ（始点＝ファイル一覧、終点＝左ツリー or 空白→現在フォルダ）
+            FilesGrid.PreviewMouseLeftButtonDown += OnFilesGrid_PreviewMouseLeftButtonDown_ForDrag;
+            FilesGrid.PreviewMouseMove += OnFilesGrid_PreviewMouseMove_ForDrag;
+            this.AllowDrop = true;
+            this.DragOver += OnRootDragOver;
+            this.Drop += OnRootDrop;
+
             // 初期ロード（※Loadedはタブ再表示でも繰り返し発火するため、初回だけ実行）
             Loaded += async (_, __) =>
             {
@@ -98,7 +117,7 @@ namespace Explore
                 // セッション中に保持していた選択・展開状態を復元
                 if (!await TryRestoreSelectionAndExpansionAsync())
                 {
-                    // 復元対象がなければ初期表示：最初のルートを展開して右ペインへ表示（従来仕様を尊重）
+                    // 復元対象がなければ初期表示：最初のルートを展開して右ペインへ表示
                     if (_vm.Roots.Count > 0)
                     {
                         var first = _vm.Roots[0];
@@ -264,7 +283,7 @@ namespace Explore
         }
 
         // ===== DataGrid：開く（ダブルクリック/Enter） =====
-        private void OnFilesGridDoubleClick(object? sender, Input.MouseButtonEventArgs e)
+        private void OnFilesGridDoubleClick(object? sender, WpfInput.MouseButtonEventArgs e)
         {
             var dep = (DependencyObject)e.OriginalSource;
             while (dep != null && dep is not DataGridRow && dep is not DataGrid)
@@ -277,9 +296,9 @@ namespace Explore
             }
         }
 
-        private void OnFilesGridKeyDown(object? sender, Input.KeyEventArgs e)
+        private void OnFilesGridKeyDown(object? sender, WpfInput.KeyEventArgs e)
         {
-            if (e.Key == Input.Key.Enter && FilesGrid?.SelectedItem is FileRow fr)
+            if (e.Key == WpfInput.Key.Enter && FilesGrid?.SelectedItem is FileRow fr)
             {
                 OpenFile(fr.FullPath);
                 e.Handled = true;
@@ -497,21 +516,25 @@ namespace Explore
                         Mime = null,
                         Summary = null,
                         Snippet = null,
-                        Classified = null,
-                        IndexedAt = 0
+                        Tags = null,
+                        Classified = null
                     };
                 }
-                catch { }
+                catch
+                {
+                    // 個別失敗はスキップ
+                }
 
                 if (rec != null) yield return rec;
-                if ((uint)Environment.TickCount % 2048 == 0) await Task.Yield();
+                if ((uint)Environment.TickCount % 2048 == 0)
+                    await Task.Yield();
             }
         }
 
         private async Task<long> GetTableCountAsync(string table)
         {
-            using var conn = new Microsoft.Data.Sqlite.SqliteConnection(
-                new SqliteConnectionStringBuilder { DataSource = IndexDatabase.DatabasePath }.ToString());
+            using var conn = new SqliteConnection(
+                new SqliteConnectionStringBuilder { DataSource = _db.DatabasePath }.ToString());
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
@@ -783,5 +806,213 @@ namespace Explore
             }
         }
         // =======================================================
+
+        // ===================== ここから：D&Dで“フォルダ移動” =====================
+        private void OnFilesGrid_PreviewMouseLeftButtonDown_ForDrag(object? sender, WpfInput.MouseButtonEventArgs e)
+        {
+            _dragStart = e.GetPosition(this);
+            _dragOriginVisual = e.OriginalSource as DependencyObject;
+        }
+
+        private void OnFilesGrid_PreviewMouseMove_ForDrag(object? sender, WpfInput.MouseEventArgs e)
+        {
+            if (e.LeftButton != WpfInput.MouseButtonState.Pressed || _dragOriginVisual == null) return;
+
+            var now = e.GetPosition(this);
+            if (Math.Abs(now.X - _dragStart.X) < 4 && Math.Abs(now.Y - _dragStart.Y) < 4) return;
+
+            // 複数選択を優先
+            var selected = FilesGrid?.SelectedItems?.OfType<FileRow>().Select(r => r.FullPath).ToArray();
+            if (selected == null || selected.Length == 0)
+            {
+                // 1件もなければ、押下位置から FileRow を拾う
+                var row = FindDataContext<FileRow>(_dragOriginVisual);
+                if (row != null) selected = new[] { row.FullPath };
+            }
+            if (selected == null || selected.Length == 0) return;
+
+            var data = new WpfDataObject();
+            data.SetData(WpfDataFormats.FileDrop, selected);
+
+            try { WpfDragDrop.DoDragDrop(this, data, WpfDragDropEffects.Move); }
+            catch { /* ignore */ }
+            finally { _dragOriginVisual = null; }
+        }
+
+        private void OnRootDragOver(object? sender, WpfDragEventArgs e)
+        {
+            if (!e.Data.GetDataPresent(WpfDataFormats.FileDrop))
+            {
+                e.Effects = WpfDragDropEffects.None;
+                e.Handled = true;
+                return;
+            }
+
+            var target = HitFolderNode(e.GetPosition(this));
+            if (target != null && Directory.Exists(target.FullPath))
+                e.Effects = WpfDragDropEffects.Move;
+            else
+                e.Effects = string.IsNullOrWhiteSpace(_vm.CurrentPath) ? WpfDragDropEffects.None : WpfDragDropEffects.Move;
+
+            e.Handled = true;
+        }
+
+        private async void OnRootDrop(object? sender, WpfDragEventArgs e)
+        {
+            try
+            {
+                if (!e.Data.GetDataPresent(WpfDataFormats.FileDrop)) return;
+                var paths = (string[])e.Data.GetData(WpfDataFormats.FileDrop);
+                if (paths == null || paths.Length == 0) return;
+
+                string? destDir = HitFolderNode(e.GetPosition(this))?.FullPath;
+                if (string.IsNullOrWhiteSpace(destDir)) destDir = _vm.CurrentPath;
+
+                if (string.IsNullOrWhiteSpace(destDir) || !Directory.Exists(destDir))
+                {
+                    WpfMessageBox.Show("移動先フォルダーが見つかりませんでした。");
+                    return;
+                }
+
+                await MoveFilesAsync(paths, destDir!);
+                await _vm.RefreshAsync();
+
+                // Freshness 更新（元/先の両方）
+                var srcParents = paths.Select(p => Path.GetDirectoryName(p))
+                                      .Where(d => !string.IsNullOrWhiteSpace(d))
+                                      .Distinct(StringComparer.OrdinalIgnoreCase)
+                                      .ToList();
+                foreach (var d in srcParents) _fresh.InvalidateFreshnessCache(d!);
+                _fresh.InvalidateFreshnessCache(destDir!);
+                await RefreshCurrentFolderViewAsync();
+            }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(ex.Message, "Move Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async Task MoveFilesAsync(IEnumerable<string> sources, string destDir)
+        {
+            var errors = new List<string>();
+            Directory.CreateDirectory(destDir);
+
+            foreach (var src in sources)
+            {
+                try
+                {
+                    if (!File.Exists(src)) continue;
+
+                    var name = Path.GetFileName(src);
+                    var destPath = Path.Combine(destDir, name);
+
+                    // 同じ完全パスならスキップ
+                    if (string.Equals(src, destPath, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    // 上書き回避（filename (1).ext …）
+                    destPath = EnsureUniquePath(destPath);
+
+                    // 旧キーは移動前に取得（別ボリューム移動で変化しうる）
+                    var oldKey = FileKeyUtil.GetStableKey(src);
+
+                    File.Move(src, destPath);
+
+                    // DBを新パスでUpsert
+                    var fi = new FileInfo(destPath);
+                    var rec = new DbFileRecord
+                    {
+                        FileKey = FileKeyUtil.GetStableKey(destPath),
+                        Path = fi.FullName,
+                        Parent = fi.DirectoryName,
+                        Name = fi.Name,
+                        Ext = fi.Extension,
+                        Size = fi.Exists ? fi.Length : 0,
+                        MTimeUnix = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeSeconds(),
+                        CTimeUnix = new DateTimeOffset(fi.CreationTimeUtc).ToUnixTimeSeconds(),
+                        Mime = null,
+                        Summary = null,
+                        Snippet = null,
+                        Tags = null,
+                        Classified = null
+                    };
+                    await _db.UpsertFileAsync(rec); // files を新パスで更新
+
+                    // キーが変わった（別ボリュームなど）場合は旧キーの残骸を掃除
+                    var newKey = rec.FileKey;
+                    if (!string.Equals(oldKey, newKey, StringComparison.Ordinal))
+                        await DeleteByFileKeyAsync(oldKey);
+
+                    // moves ログ
+                    await LogMoveAsync(oldKey, src, destPath);
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"{Path.GetFileName(src)} : {ex.Message}");
+                }
+            }
+
+            if (errors.Count > 0)
+            {
+                WpfMessageBox.Show("一部移動に失敗しました。\n\n" + string.Join("\n", errors.Take(10)) +
+                    (errors.Count > 10 ? $"\n…ほか {errors.Count - 10} 件" : ""),
+                    "Move", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private static string EnsureUniquePath(string destPath)
+        {
+            if (!File.Exists(destPath)) return destPath;
+
+            var dir = Path.GetDirectoryName(destPath)!;
+            var baseName = Path.GetFileNameWithoutExtension(destPath);
+            var ext = Path.GetExtension(destPath);
+            for (int i = 1; ; i++)
+            {
+                var cand = Path.Combine(dir, $"{baseName} ({i}){ext}");
+                if (!File.Exists(cand)) return cand;
+            }
+        }
+
+        private async Task DeleteByFileKeyAsync(string fileKey)
+        {
+            using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _db.DatabasePath }.ToString());
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM files WHERE file_key=$k";
+            cmd.Parameters.AddWithValue("$k", fileKey);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        private async Task LogMoveAsync(string fileKey, string oldPath, string newPath)
+        {
+            using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _db.DatabasePath }.ToString());
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+INSERT INTO moves(file_key, old_path, new_path, op, reason, at)
+VALUES($k,$o,$n,'move',NULL,$t)";
+            cmd.Parameters.AddWithValue("$k", fileKey);
+            cmd.Parameters.AddWithValue("$o", oldPath);
+            cmd.Parameters.AddWithValue("$n", newPath);
+            cmd.Parameters.AddWithValue("$t", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        private FolderNode? HitFolderNode(WpfPoint p)
+        {
+            var hit = this.InputHitTest(p) as DependencyObject;
+            return FindDataContext<FolderNode>(hit);
+        }
+
+        private static T? FindDataContext<T>(DependencyObject? start) where T : class
+        {
+            while (start != null)
+            {
+                if (start is FrameworkElement fe && fe.DataContext is T t) return t;
+                start = VisualTreeHelper.GetParent(start);
+            }
+            return null;
+        }
+        // ===================== ここまで：D&Dで“フォルダ移動” =====================
     }
 }
