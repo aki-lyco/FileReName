@@ -76,13 +76,16 @@ namespace Explore
         {
             InitializeComponent();
 
-            // ★ TreeView のイベントをコード側で紐付け（XAML直書きなし）
+            // ★ TreeView のイベントをコード側で紐付け
             FolderTree.SelectedItemChanged += OnFolderSelected;
             FolderTree.AddHandler(TreeViewItem.ExpandedEvent, new RoutedEventHandler(OnNodeExpanded));
-            // 追加: 折りたたみも追跡
             FolderTree.AddHandler(TreeViewItem.CollapsedEvent, new RoutedEventHandler(OnNodeCollapsed));
 
-            // ボタンや DataGrid のイベントもここで登録
+            // TreeView からのドラッグ開始（フォルダ移動）
+            FolderTree.PreviewMouseLeftButtonDown += OnFolderTree_PreviewMouseLeftButtonDown_ForDrag;
+            FolderTree.PreviewMouseMove += OnFolderTree_PreviewMouseMove_ForDrag;
+
+            // ボタンや DataGrid のイベント
             BtnNewCreate.Click += OnNewButtonClick;
             BtnIndex.Click += OnIndexCurrentFolderClick;
             BtnIndexDiff.Click += OnIndexOnlyUnindexedClick;
@@ -95,9 +98,11 @@ namespace Explore
             FilesGrid.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnFilesGridMenuClick));
             FolderTree.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnFolderTreeMenuClick));
 
-            // ★★ 追加：ドラッグ＆ドロップ（始点＝ファイル一覧、終点＝左ツリー or 空白→現在フォルダ）
+            // ★★ ファイル一覧からのD&D（ファイル移動）
             FilesGrid.PreviewMouseLeftButtonDown += OnFilesGrid_PreviewMouseLeftButtonDown_ForDrag;
             FilesGrid.PreviewMouseMove += OnFilesGrid_PreviewMouseMove_ForDrag;
+
+            // ルートでDrop受付（ファイル・フォルダ共通）
             this.AllowDrop = true;
             this.DragOver += OnRootDragOver;
             this.Drop += OnRootDrop;
@@ -112,12 +117,11 @@ namespace Explore
                 await _db.EnsureCreatedAsync();
 
                 if (_vm.Roots.Count == 0)
-                    await _vm.LoadRootsAsync(); // 既に読み込み済みなら再作成しない（表示維持）
+                    await _vm.LoadRootsAsync();
 
-                // セッション中に保持していた選択・展開状態を復元
+                // セッション中の選択・展開状態を復元
                 if (!await TryRestoreSelectionAndExpansionAsync())
                 {
-                    // 復元対象がなければ初期表示：最初のルートを展開して右ペインへ表示
                     if (_vm.Roots.Count > 0)
                     {
                         var first = _vm.Roots[0];
@@ -154,9 +158,7 @@ namespace Explore
         private async void OnFolderSelected(object? sender, RoutedPropertyChangedEventArgs<object> e)
         {
             if (e.NewValue is not FolderNode node) return;
-            // 追加: 最後に選んだフォルダをセッション保存
             SessionExplorerState.LastSelectedPath = node.FullPath;
-
             await NavigateAndFillAsync(node.FullPath);
         }
 
@@ -165,13 +167,11 @@ namespace Explore
             if (e.OriginalSource is TreeViewItem tvi && tvi.DataContext is FolderNode node)
             {
                 await _vm.EnsureChildrenLoadedAsync(node);
-                // 追加: 展開パスを記録
                 if (Directory.Exists(node.FullPath))
                     SessionExplorerState.ExpandedPaths.Add(node.FullPath);
             }
         }
 
-        // 追加: 折りたたみ追跡
         private void OnNodeCollapsed(object? sender, RoutedEventArgs e)
         {
             if (e.OriginalSource is TreeViewItem tvi && tvi.DataContext is FolderNode node)
@@ -473,7 +473,7 @@ namespace Explore
                                 Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
                         }
                     }
-                    catch { /* 個別失敗は無視（必要ならログ） */ }
+                    catch { /* 個別失敗は無視 */ }
                 }
             });
         }
@@ -505,8 +505,8 @@ namespace Explore
                     var fi = new FileInfo(path);
                     rec = new DbFileRecord
                     {
-                        FileKey = FileKeyUtil.GetStableKey(fi.FullName),
-                        Path = fi.FullName,
+                        FileKey = FileKeyUtil.GetStableKey(fi.FullName), // ← FullName
+                        Path = fi.FullName,                               // ← FullName
                         Parent = fi.DirectoryName,
                         Name = fi.Name,
                         Ext = fi.Extension,
@@ -532,8 +532,7 @@ namespace Explore
 
         private async Task<long> GetTableCountAsync(string table)
         {
-            using var conn = new SqliteConnection(
-                new SqliteConnectionStringBuilder { DataSource = IndexDatabase.DatabasePath }.ToString());
+            await using var conn = OpenConn();
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
@@ -733,10 +732,9 @@ namespace Explore
         {
             bool didSomething = false;
 
-            // 1) 展開状態の復元（親から順に）
             var expanded = SessionExplorerState.ExpandedPaths
                 .Where(Directory.Exists)
-                .OrderBy(p => p.Length) // 親→子の順で開く
+                .OrderBy(p => p.Length)
                 .ToArray();
 
             foreach (var p in expanded)
@@ -745,11 +743,10 @@ namespace Explore
                     didSomething = true;
             }
 
-            // 2) 最後に選択していたフォルダへナビゲーション
             var last = SessionExplorerState.LastSelectedPath;
             if (!string.IsNullOrWhiteSpace(last) && Directory.Exists(last))
             {
-                await TryExpandPathAsync(last); // 祖先が閉じていても辿れるように
+                await TryExpandPathAsync(last);
                 await NavigateAndFillAsync(last);
                 didSomething = true;
             }
@@ -761,7 +758,6 @@ namespace Explore
         {
             try
             {
-                // ルート（ドライブ）ノードを特定
                 var rootPath = Path.GetPathRoot(path) ?? "";
                 var root = _vm.Roots.FirstOrDefault(r =>
                     string.Equals(r.FullPath, rootPath, StringComparison.OrdinalIgnoreCase));
@@ -770,7 +766,6 @@ namespace Explore
                 await _vm.EnsureChildrenLoadedAsync(root);
                 root.IsExpanded = true;
 
-                // ルート配下を1階層ずつ辿る
                 var remain = path.Substring(rootPath.Length).Trim('\\');
                 if (remain.Length == 0) return true;
 
@@ -785,7 +780,6 @@ namespace Explore
                         string.Equals(c.FullPath, nextFull, StringComparison.OrdinalIgnoreCase));
                     if (next == null)
                     {
-                        // 子がまだ生成されていない可能性 → 読み込んで再検索
                         await _vm.EnsureChildrenLoadedAsync(current);
                         next = current.Children.FirstOrDefault(c =>
                             string.Equals(c.FullPath, nextFull, StringComparison.OrdinalIgnoreCase));
@@ -806,7 +800,9 @@ namespace Explore
         }
         // =======================================================
 
-        // ===================== ここから：D&Dで“フォルダ移動” =====================
+        // ===================== ここから：D&Dで“ファイル／フォルダ移動” =====================
+
+        // --- ファイル一覧からのドラッグ開始 ---
         private void OnFilesGrid_PreviewMouseLeftButtonDown_ForDrag(object? sender, WpfInput.MouseButtonEventArgs e)
         {
             _dragStart = e.GetPosition(this);
@@ -824,7 +820,6 @@ namespace Explore
             var selected = FilesGrid?.SelectedItems?.OfType<FileRow>().Select(r => r.FullPath).ToArray();
             if (selected == null || selected.Length == 0)
             {
-                // 1件もなければ、押下位置から FileRow を拾う
                 var row = FindDataContext<FileRow>(_dragOriginVisual);
                 if (row != null) selected = new[] { row.FullPath };
             }
@@ -832,12 +827,40 @@ namespace Explore
 
             var data = new WpfDataObject();
             data.SetData(WpfDataFormats.FileDrop, selected);
-
             try { WpfDragDrop.DoDragDrop(this, data, WpfDragDropEffects.Move); }
             catch { /* ignore */ }
             finally { _dragOriginVisual = null; }
         }
 
+        // --- ツリー（フォルダ）からのドラッグ開始 ---
+        private void OnFolderTree_PreviewMouseLeftButtonDown_ForDrag(object? sender, WpfInput.MouseButtonEventArgs e)
+        {
+            _dragStart = e.GetPosition(this);
+            _dragOriginVisual = e.OriginalSource as DependencyObject;
+        }
+
+        private void OnFolderTree_PreviewMouseMove_ForDrag(object? sender, WpfInput.MouseEventArgs e)
+        {
+            if (e.LeftButton != WpfInput.MouseButtonState.Pressed || _dragOriginVisual == null) return;
+
+            var now = e.GetPosition(this);
+            if (Math.Abs(now.X - _dragStart.X) < 4 && Math.Abs(now.Y - _dragStart.Y) < 4) return;
+
+            // クリック元のノードを取得（TreeViewは単一選択想定）
+            var node = FindDataContext<FolderNode>(_dragOriginVisual);
+            if (node == null || string.IsNullOrWhiteSpace(node.FullPath) || !Directory.Exists(node.FullPath)) return;
+
+            // ドライブ直下（ルート）や自身の親がないものの移動は禁止（安全側）
+            if (string.IsNullOrWhiteSpace(Path.GetDirectoryName(node.FullPath))) return;
+
+            var data = new WpfDataObject();
+            data.SetData(WpfDataFormats.FileDrop, new[] { node.FullPath });
+            try { WpfDragDrop.DoDragDrop(this, data, WpfDragDropEffects.Move); }
+            catch { /* ignore */ }
+            finally { _dragOriginVisual = null; }
+        }
+
+        // --- Drop先の判定（ファイル・フォルダ共通） ---
         private void OnRootDragOver(object? sender, WpfDragEventArgs e)
         {
             if (!e.Data.GetDataPresent(WpfDataFormats.FileDrop))
@@ -847,12 +870,30 @@ namespace Explore
                 return;
             }
 
-            var target = HitFolderNode(e.GetPosition(this));
-            if (target != null && Directory.Exists(target.FullPath))
-                e.Effects = WpfDragDropEffects.Move;
-            else
-                e.Effects = string.IsNullOrWhiteSpace(_vm.CurrentPath) ? WpfDragDropEffects.None : WpfDragDropEffects.Move;
+            string? destDir = HitFolderNode(e.GetPosition(this))?.FullPath ?? _vm.CurrentPath;
+            if (string.IsNullOrWhiteSpace(destDir) || !Directory.Exists(destDir))
+            {
+                e.Effects = WpfDragDropEffects.None;
+                e.Handled = true;
+                return;
+            }
 
+            // 自己配下へのフォルダ移動は禁止
+            var paths = (string[])e.Data.GetData(WpfDataFormats.FileDrop);
+            if (paths != null && paths.Length > 0)
+            {
+                foreach (var p in paths)
+                {
+                    if (Directory.Exists(p) && IsSubPath(p, destDir))
+                    {
+                        e.Effects = WpfDragDropEffects.None;
+                        e.Handled = true;
+                        return;
+                    }
+                }
+            }
+
+            e.Effects = WpfDragDropEffects.Move;
             e.Handled = true;
         }
 
@@ -873,11 +914,14 @@ namespace Explore
                     return;
                 }
 
-                await MoveFilesAsync(paths, destDir!);
-                await _vm.RefreshAsync();
+                await MoveAnyAsync(paths, destDir!);
+                await _vm.RefreshAsync();                 // 右ペイン更新
+
+                // ★ 移動後：ツリーのソース親 / 移動先を再読込して残像を消す
+                await RefreshTreeAfterMoveAsync(paths, destDir!);
 
                 // Freshness 更新（元/先の両方）
-                var srcParents = paths.Select(p => Path.GetDirectoryName(p))
+                var srcParents = paths.Select(p => Directory.Exists(p) ? p : Path.GetDirectoryName(p))
                                       .Where(d => !string.IsNullOrWhiteSpace(d))
                                       .Distinct(StringComparer.OrdinalIgnoreCase)
                                       .ToList();
@@ -891,7 +935,82 @@ namespace Explore
             }
         }
 
-        private async Task MoveFilesAsync(IEnumerable<string> sources, string destDir)
+        // 移動後にツリーの親ノードをリフレッシュ（残像除去）
+        private async Task RefreshTreeAfterMoveAsync(IEnumerable<string> sources, string destDir)
+        {
+            var parents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var src in sources)
+            {
+                // ★ 移動後は src が存在しなくなるので Exists チェックはしない
+                var p = Path.GetDirectoryName(src?.TrimEnd(Path.DirectorySeparatorChar) ?? "");
+                if (!string.IsNullOrWhiteSpace(p)) parents.Add(p);
+            }
+
+            // 移動先自身も更新（新しい子が見えるように）
+            parents.Add(destDir);
+
+            foreach (var parent in parents)
+                await ForceRefreshFolderNodeAsync(parent);
+        }
+
+
+        // ★ 指定パスのフォルダノードの子を強制的に差し替え
+        private async Task ForceRefreshFolderNodeAsync(string folderPath)
+        {
+            var node = await GetNodeByPathAsync(folderPath);
+            if (node == null) return;
+
+            var list = new List<string>();
+            try
+            {
+                foreach (var dir in Directory.EnumerateDirectories(folderPath))
+                {
+                    try
+                    {
+                        var di = new DirectoryInfo(dir);
+                        if ((di.Attributes & FileAttributes.Hidden) != 0) continue;
+                        if ((di.Attributes & FileAttributes.System) != 0) continue;
+                        list.Add(dir);
+                    }
+                    catch { /* 個別失敗は無視 */ }
+                }
+            }
+            catch { /* 列挙失敗も黙殺 */ }
+
+            node.ReplaceChildren(list.Select(FolderNode.Create));
+            node.IsExpanded = true;
+            node._isLoaded = true; // 以後は読み込み済み扱い
+        }
+
+        // ★ ツリー上のパスからノードを取得（必要なら祖先を展開して作る）
+        private async Task<FolderNode?> GetNodeByPathAsync(string path)
+        {
+            await TryExpandPathAsync(path); // 祖先を展開しておく
+            return FindNodeInTree(path);
+        }
+        private FolderNode? FindNodeInTree(string path)
+        {
+            foreach (var r in _vm.Roots)
+            {
+                var found = FindNodeRecursive(r, path);
+                if (found != null) return found;
+            }
+            return null;
+        }
+        private static FolderNode? FindNodeRecursive(FolderNode node, string targetPath)
+        {
+            if (string.Equals(node.FullPath, targetPath, StringComparison.OrdinalIgnoreCase)) return node;
+            foreach (var c in node.Children)
+            {
+                var f = FindNodeRecursive(c, targetPath);
+                if (f != null) return f;
+            }
+            return null;
+        }
+
+        // ファイル/フォルダ混在対応
+        private async Task MoveAnyAsync(IEnumerable<string> sources, string destDir)
         {
             var errors = new List<string>();
             Directory.CreateDirectory(destDir);
@@ -900,52 +1019,14 @@ namespace Explore
             {
                 try
                 {
-                    if (!File.Exists(src)) continue;
-
-                    var name = Path.GetFileName(src);
-                    var destPath = Path.Combine(destDir, name);
-
-                    // 同じ完全パスならスキップ
-                    if (string.Equals(src, destPath, StringComparison.OrdinalIgnoreCase)) continue;
-
-                    // 上書き回避（filename (1).ext …）
-                    destPath = EnsureUniquePath(destPath);
-
-                    // 旧キーは移動前に取得（別ボリューム移動で変化しうる）
-                    var oldKey = FileKeyUtil.GetStableKey(src);
-
-                    File.Move(src, destPath);
-
-                    // DBを新パスでUpsert
-                    var fi = new FileInfo(destPath);
-                    var rec = new DbFileRecord
-                    {
-                        FileKey = FileKeyUtil.GetStableKey(destPath),
-                        Path = fi.FullName,
-                        Parent = fi.DirectoryName,
-                        Name = fi.Name,
-                        Ext = fi.Extension,
-                        Size = fi.Exists ? fi.Length : 0,
-                        MTimeUnix = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeSeconds(),
-                        CTimeUnix = new DateTimeOffset(fi.CreationTimeUtc).ToUnixTimeSeconds(),
-                        Mime = null,
-                        Summary = null,
-                        Snippet = null,
-                        Classified = null
-                    };
-                    await _db.UpsertFileAsync(rec); // files を新パスで更新
-
-                    // キーが変わった（別ボリュームなど）場合は旧キーの残骸を掃除
-                    var newKey = rec.FileKey;
-                    if (!string.Equals(oldKey, newKey, StringComparison.Ordinal))
-                        await DeleteByFileKeyAsync(oldKey, CancellationToken.None);
-
-                    // moves ログ
-                    await LogMoveAsync(oldKey, src, destPath, CancellationToken.None);
+                    if (File.Exists(src))
+                        await MoveOneFileAsync(src, destDir);
+                    else if (Directory.Exists(src))
+                        await MoveOneDirectoryAsync(src, destDir);
                 }
                 catch (Exception ex)
                 {
-                    errors.Add($"{Path.GetFileName(src)} : {ex.Message}");
+                    errors.Add($"{Path.GetFileName(src.TrimEnd(Path.DirectorySeparatorChar))} : {ex.Message}");
                 }
             }
 
@@ -957,7 +1038,93 @@ namespace Explore
             }
         }
 
-        private static string EnsureUniquePath(string destPath)
+        // 単一ファイル移動
+        private async Task MoveOneFileAsync(string src, string destDir)
+        {
+            var name = Path.GetFileName(src);
+            var destPath = Path.Combine(destDir, name);
+
+            // 同じ完全パスならスキップ
+            if (string.Equals(src, destPath, StringComparison.OrdinalIgnoreCase)) return;
+
+            // 上書き回避（filename (1).ext …）
+            destPath = EnsureUniqueFilePath(destPath);
+
+            // 旧キーは移動前に取得（別ボリューム移動で変化しうる）
+            var oldKey = FileKeyUtil.GetStableKey(src);
+
+            // 実移動
+            SafeFileMove(src, destPath);
+
+            // DBを新パスでUpsert
+            var rec = BuildRecordFromFs(destPath);
+            await _db.UpsertFileAsync(rec);
+
+            // キーが変わった（別ボリュームなど）場合は旧キーの残骸を掃除
+            var newKey = rec.FileKey;
+            if (!string.Equals(oldKey, newKey, StringComparison.Ordinal))
+                await DeleteByFileKeyAsync(oldKey, CancellationToken.None);
+
+            // moves ログ
+            await LogMoveAsync(oldKey, src, destPath, CancellationToken.None);
+        }
+
+        // 単一フォルダ移動（自己配下への移動は呼び出し前チェック済）
+        private async Task MoveOneDirectoryAsync(string srcDir, string destParent)
+        {
+            // ルート・ドライブ直下などは移動不可
+            if (string.IsNullOrWhiteSpace(Path.GetDirectoryName(srcDir)))
+                throw new InvalidOperationException("このフォルダーは移動できません。");
+
+            var finalDest = Path.Combine(destParent, Path.GetFileName(srcDir.TrimEnd(Path.DirectorySeparatorChar)));
+            finalDest = EnsureUniqueDirectoryPath(finalDest);
+
+            // 移動前に配下ファイルを列挙（旧パス→新パス、旧キー）を記録
+            var oldFiles = EnumerateAllFiles(srcDir).ToList();
+            var mapping = new List<(string oldPath, string newPath, string oldKey)>(oldFiles.Count);
+            foreach (var oldPath in oldFiles)
+            {
+                var rel = Path.GetRelativePath(srcDir, oldPath);
+                var newPath = Path.Combine(finalDest, rel);
+                mapping.Add((oldPath, newPath, FileKeyUtil.GetStableKey(oldPath)));
+            }
+
+            var sameVolume = string.Equals(Path.GetPathRoot(srcDir), Path.GetPathRoot(destParent), StringComparison.OrdinalIgnoreCase);
+            if (sameVolume)
+            {
+                // 同一ボリュームは丸ごとMove
+                Directory.Move(srcDir, finalDest);
+            }
+            else
+            {
+                // 異なるボリュームはコピー → 元削除
+                await CopyDirectoryAsync(srcDir, finalDest);
+                try { Directory.Delete(srcDir, recursive: true); }
+                catch (Exception ex)
+                {
+                    // コピー済みなら致命ではないが通知
+                    WpfMessageBox.Show($"元フォルダの削除に失敗: {ex.Message}", "フォルダ移動", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+
+            // DB更新＆ログ（各ファイル単位）
+            foreach (var (oldPath, newPath, oldKey) in mapping)
+            {
+                if (!File.Exists(newPath)) continue; // コピー/Moveに失敗したファイルはスキップ
+
+                var rec = BuildRecordFromFs(newPath);
+                await _db.UpsertFileAsync(rec);
+
+                // キー変化があれば旧キー掃除
+                if (!string.Equals(oldKey, rec.FileKey, StringComparison.Ordinal))
+                    await DeleteByFileKeyAsync(oldKey, CancellationToken.None);
+
+                await LogMoveAsync(oldKey, oldPath, newPath, CancellationToken.None);
+            }
+        }
+
+        // === ファイル／フォルダ move 実体＆補助 ===
+        private static string EnsureUniqueFilePath(string destPath)
         {
             if (!File.Exists(destPath)) return destPath;
 
@@ -971,7 +1138,83 @@ namespace Explore
             }
         }
 
-        // ===== ここから：DBユーティリティ（IndexDatabaseに無い操作をローカル実装） =====
+        private static string EnsureUniqueDirectoryPath(string destPath)
+        {
+            if (!Directory.Exists(destPath)) return destPath;
+
+            var dir = Path.GetDirectoryName(destPath)!;
+            var name = Path.GetFileName(destPath.TrimEnd(Path.DirectorySeparatorChar));
+            for (int i = 1; ; i++)
+            {
+                var cand = Path.Combine(dir, $"{name} ({i})");
+                if (!Directory.Exists(cand)) return cand;
+            }
+        }
+
+        private static void SafeFileMove(string src, string dest)
+        {
+            var sameVolume = string.Equals(Path.GetPathRoot(src), Path.GetPathRoot(dest), StringComparison.OrdinalIgnoreCase);
+            if (sameVolume)
+            {
+                File.Move(src, dest);
+            }
+            else
+            {
+                // 異ボリュームはコピー→元削除
+                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                File.Copy(src, dest, overwrite: false);
+                File.Delete(src);
+            }
+        }
+
+        private static IEnumerable<string> EnumerateAllFiles(string root)
+        {
+            var opts = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.Hidden | FileAttributes.System
+            };
+            foreach (var f in Directory.EnumerateFiles(root, "*", opts))
+                yield return f;
+        }
+
+        private static Task CopyDirectoryAsync(string srcDir, string destDir)
+        {
+            return Task.Run(() =>
+            {
+                var stack = new Stack<(string src, string dst)>();
+                stack.Push((srcDir, destDir));
+
+                while (stack.Count > 0)
+                {
+                    var (s, d) = stack.Pop();
+                    Directory.CreateDirectory(d);
+
+                    foreach (var file in Directory.GetFiles(s))
+                    {
+                        var dstFile = Path.Combine(d, Path.GetFileName(file));
+                        File.Copy(file, dstFile, overwrite: false);
+                    }
+                    foreach (var sub in Directory.GetDirectories(s))
+                    {
+                        stack.Push((sub, Path.Combine(d, Path.GetFileName(sub))));
+                    }
+                }
+            });
+        }
+
+        private static bool IsSubPath(string parent, string candidate)
+        {
+            static string Norm(string p) => Path.GetFullPath(p.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + Path.DirectorySeparatorChar;
+            var p0 = Norm(parent);
+            var c0 = Norm(candidate);
+            return c0.StartsWith(p0, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // ===================== ここまで：D&Dで“ファイル／フォルダ移動” =====================
+
+        // ===== DBユーティリティ（IndexDatabaseに無い操作をローカル実装） =====
         private static SqliteConnection OpenConn()
             => new(new SqliteConnectionStringBuilder { DataSource = IndexDatabase.DatabasePath }.ToString());
 
@@ -980,8 +1223,8 @@ namespace Explore
             var fi = new FileInfo(path);
             return new DbFileRecord
             {
-                FileKey = FileKeyUtil.GetStableKey(fi.FullName),
-                Path = fi.FullName,
+                FileKey = FileKeyUtil.GetStableKey(fi.FullName), // ← FullName
+                Path = fi.FullName,                               // ← FullName
                 Parent = fi.DirectoryName,
                 Name = fi.Name,
                 Ext = fi.Extension,
@@ -1036,8 +1279,8 @@ VALUES($k,$o,$n,'move',NULL,$t)";
             cmd.Parameters.AddWithValue("$t", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             await cmd.ExecuteNonQueryAsync(ct);
         }
-        // ===== ここまで：DBユーティリティ =====
 
+        // ===== 汎用 =====
         private FolderNode? HitFolderNode(WpfPoint p)
         {
             var hit = this.InputHitTest(p) as DependencyObject;
@@ -1053,6 +1296,5 @@ VALUES($k,$o,$n,'move',NULL,$t)";
             }
             return null;
         }
-        // ===================== ここまで：D&Dで“フォルダ移動” =====================
     }
 }
