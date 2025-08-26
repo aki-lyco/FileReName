@@ -17,7 +17,7 @@ using Explore.FileSystem;
 using Explore.Indexing;
 using Microsoft.Data.Sqlite;
 
-// ====== 追加: WPF型を明示するためのエイリアス ======
+// ====== WPF型を明示するためのエイリアス ======
 using WpfMessageBox = System.Windows.MessageBox;
 using WpfInput = System.Windows.Input;
 using WpfPoint = System.Windows.Point;
@@ -31,7 +31,7 @@ namespace Explore
 {
     public partial class FilesControl : System.Windows.Controls.UserControl, INotifyPropertyChanged
     {
-        // ========= 追加: セッション内だけ保持するUI状態メモリ =========
+        // ========= セッション内だけ保持するUI状態メモリ =========
         private static class SessionExplorerState
         {
             public static readonly HashSet<string> ExpandedPaths = new(StringComparer.OrdinalIgnoreCase);
@@ -265,7 +265,7 @@ namespace Explore
                 foreach (var r in Rows)
                 {
                     if (r.FreshState != FreshState.Unindexed) continue;
-                    try { await _db.UpsertFileFromFsAsync(r.FullPath, CancellationToken.None); done++; }
+                    try { await UpsertFileFromFsAsync(r.FullPath, CancellationToken.None); done++; }
                     catch { /* ignore */ }
                 }
 
@@ -373,7 +373,7 @@ namespace Explore
         {
             try
             {
-                await _db.UpsertFileFromFsAsync(path, CancellationToken.None);
+                await UpsertFileFromFsAsync(path, CancellationToken.None);
                 var dir = Path.GetDirectoryName(path) ?? _vm.CurrentPath ?? "";
                 _fresh.InvalidateFreshnessCache(dir);
                 await RefreshRowsFreshnessAsync(dir);
@@ -389,7 +389,7 @@ namespace Explore
         {
             try
             {
-                await _db.DeleteByPathAsync(path, CancellationToken.None);
+                await DeleteByPathAsync(path, CancellationToken.None);
                 var dir = Path.GetDirectoryName(path) ?? _vm.CurrentPath ?? "";
                 _fresh.InvalidateFreshnessCache(dir);
                 await RefreshRowsFreshnessAsync(dir);
@@ -516,7 +516,6 @@ namespace Explore
                         Mime = null,
                         Summary = null,
                         Snippet = null,
-                        Tags = null,
                         Classified = null
                     };
                 }
@@ -534,7 +533,7 @@ namespace Explore
         private async Task<long> GetTableCountAsync(string table)
         {
             using var conn = new SqliteConnection(
-                new SqliteConnectionStringBuilder { DataSource = _db.DatabasePath }.ToString());
+                new SqliteConnectionStringBuilder { DataSource = IndexDatabase.DatabasePath }.ToString());
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
@@ -729,7 +728,7 @@ namespace Explore
         }
         #endregion
 
-        // ========= 追加: 展開・選択状態の復元ロジック =========
+        // ========= 展開・選択状態の復元ロジック =========
         private async Task<bool> TryRestoreSelectionAndExpansionAsync()
         {
             bool didSomething = false;
@@ -932,7 +931,6 @@ namespace Explore
                         Mime = null,
                         Summary = null,
                         Snippet = null,
-                        Tags = null,
                         Classified = null
                     };
                     await _db.UpsertFileAsync(rec); // files を新パスで更新
@@ -940,10 +938,10 @@ namespace Explore
                     // キーが変わった（別ボリュームなど）場合は旧キーの残骸を掃除
                     var newKey = rec.FileKey;
                     if (!string.Equals(oldKey, newKey, StringComparison.Ordinal))
-                        await DeleteByFileKeyAsync(oldKey);
+                        await DeleteByFileKeyAsync(oldKey, CancellationToken.None);
 
                     // moves ログ
-                    await LogMoveAsync(oldKey, src, destPath);
+                    await LogMoveAsync(oldKey, src, destPath, CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
@@ -973,20 +971,61 @@ namespace Explore
             }
         }
 
-        private async Task DeleteByFileKeyAsync(string fileKey)
+        // ===== ここから：DBユーティリティ（IndexDatabaseに無い操作をローカル実装） =====
+        private static SqliteConnection OpenConn()
+            => new(new SqliteConnectionStringBuilder { DataSource = IndexDatabase.DatabasePath }.ToString());
+
+        private static DbFileRecord BuildRecordFromFs(string path)
         {
-            using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _db.DatabasePath }.ToString());
-            await conn.OpenAsync();
+            var fi = new FileInfo(path);
+            return new DbFileRecord
+            {
+                FileKey = FileKeyUtil.GetStableKey(fi.FullName),
+                Path = fi.FullName,
+                Parent = fi.DirectoryName,
+                Name = fi.Name,
+                Ext = fi.Extension,
+                Size = fi.Exists ? fi.Length : 0,
+                MTimeUnix = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeSeconds(),
+                CTimeUnix = new DateTimeOffset(fi.CreationTimeUtc).ToUnixTimeSeconds(),
+                Mime = null,
+                Summary = null,
+                Snippet = null,
+                Classified = null
+            };
+        }
+
+        private async Task UpsertFileFromFsAsync(string path, CancellationToken ct)
+        {
+            if (!File.Exists(path)) return;
+            var rec = BuildRecordFromFs(path);
+            await _db.UpsertFileAsync(rec);
+        }
+
+        private async Task DeleteByFileKeyAsync(string fileKey, CancellationToken ct)
+        {
+            await using var conn = OpenConn();
+            await conn.OpenAsync(ct);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "DELETE FROM files WHERE file_key=$k";
             cmd.Parameters.AddWithValue("$k", fileKey);
-            await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync(ct);
         }
 
-        private async Task LogMoveAsync(string fileKey, string oldPath, string newPath)
+        private async Task DeleteByPathAsync(string path, CancellationToken ct)
         {
-            using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _db.DatabasePath }.ToString());
-            await conn.OpenAsync();
+            await using var conn = OpenConn();
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM files WHERE path=$p";
+            cmd.Parameters.AddWithValue("$p", path);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        private async Task LogMoveAsync(string fileKey, string oldPath, string newPath, CancellationToken ct)
+        {
+            await using var conn = OpenConn();
+            await conn.OpenAsync(ct);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
 INSERT INTO moves(file_key, old_path, new_path, op, reason, at)
@@ -995,8 +1034,9 @@ VALUES($k,$o,$n,'move',NULL,$t)";
             cmd.Parameters.AddWithValue("$o", oldPath);
             cmd.Parameters.AddWithValue("$n", newPath);
             cmd.Parameters.AddWithValue("$t", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync(ct);
         }
+        // ===== ここまで：DBユーティリティ =====
 
         private FolderNode? HitFolderNode(WpfPoint p)
         {
