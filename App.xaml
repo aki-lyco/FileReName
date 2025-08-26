@@ -5,6 +5,12 @@
 	<Application.Resources>
 		<ResourceDictionary>
 
+			<!-- Shared theme dictionaries -->
+			<ResourceDictionary.MergedDictionaries>
+				<ResourceDictionary Source="/Themes/LightTheme.xaml"/>
+				<ResourceDictionary Source="/Themes/ToolbarStyles.xaml"/>
+			</ResourceDictionary.MergedDictionaries>
+
 			<!-- ★ フォールバックの独自キーは置かない（LightTheme のキーと衝突させない） -->
 
 			<!-- Settings アイコンボタン（MainWindow から参照されるキー） -->
@@ -54,8 +60,7 @@
 				<Setter Property="Maximum" Value="100"/>
 			</Style>
 
-			<!-- ※ MergedDictionaries は App.xaml では使わず、
-           App.xaml.cs 側の TryLoadThemeDictionary() で読み込みます -->
+			<!-- ※ MergedDictionaries は App.xaml で読み込みます -->
 		</ResourceDictionary>
 	</Application.Resources>
 </Application>
