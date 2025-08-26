@@ -155,7 +155,7 @@
 					<StackPanel Orientation="Horizontal">
 						<TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8BD;" Margin="0,0,6,0"/>
 						<!-- Message -->
-						<TextBlock Text="チャット"/>
+						<TextBlock Text="AI検索"/>
 					</StackPanel>
 				</ToggleButton>
 

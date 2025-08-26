@@ -118,39 +118,49 @@ namespace Explore.Searching
 出力は JSON オブジェクト**のみ**。コードフェンス・前後説明・余計なキー厳禁。キー順は下記**厳守**。
 
 {
-  ""terms"": [],           // 検索で使う短い日本語キーワード（名詞中心・各8文字以内・最大5語・文を入れない）
-  ""mustPhrases"": [],     // ファイル名/パスに必須で含めたい短い句（最大3件）
-  ""extList"": [],         // 拡張子（小文字・ドット無し）
-  ""locationHints"": [],   // [""Desktop"",""Documents"",""Downloads"",""Pictures"",""Videos"",""Music"",""OneDrive""] のみ
-  ""pathLikes"": [],       // 入力に絶対パスがある場合のみ末尾に ""%""（例: ""D:/仕事/%""）
-  ""dateRange"": { ""kind"": ""modified"", ""from"": null, ""to"": null }, // to は排他
+  ""terms"": [],            // コア語（名詞中心・各8文字以内・最大8語）
+  ""softTerms"": [],        // 表記ゆれ/同義語（各8文字以内・最大8語）※少数厳選
+  ""extList"": [],          // 拡張子（小文字・ドット無し）。例: [""pdf"",""docx"",""xlsx"",""png""]
+  ""locationHints"": [],    // パスに現れやすい語（例: 学科名/部署名など）。最大3
+  ""pathLikes"": [],        // 例: [""%/Downloads/%"",""%/資料/%""]
+  ""dateRange"": {          // 期間。kind は ""modified"" または ""created""
+    ""kind"": ""modified"",
+    ""from"": null,         // 例: ""{{YESTERDAY_ISO}}"" / ""{{WEEK_START_ISO}}""
+    ""to"": null            // 例: ""{{TODAY_ISO}}"" / ""{{WEEK_END_ISO}}""（排他上限）
+  },
   ""limit"": 5,
-  ""offset"": 0
+  ""offset"": 0,
+  ""variants"": {           // 表記ゆれセット
+    ""year"": [],           // 例: [""R7"",""令和7年"",""令和七年"",""2025年""]
+    ""term"": {             // 任意語→候補配列
+      // 例: ""入学要項"": [""募集要項"",""受験案内""]
+    }
+  }
 }
 
 【厳格ルール】
-1) JSON オブジェクトのみ（コードフェンス禁止）。キー順厳守。
-2) 相対日付は {{TODAY_ISO}} 基準。to は翌日0:00の**排他上限**。
-3) locationHints は候補リストのみ。推測で入れない。
-4) pathLikes は**絶対パスが明示**された場合のみ親フォルダを ""%"" 付きで。
-5) 拡張子解釈:
+1) JSON オブジェクトのみ（コードフェンス・説明禁止）。指定以外のキーは入れない。キー順厳守。
+2) 相対日付は {{TODAY_ISO}} 基準。to は翌日0:00の**排他上限**とする。
+3) 作り話の地名・校名・部署名を勝手に追加しない。
+4) 拡張子:
    - 「過去問」「試験」「問題」→ [""pdf"",""jpg"",""jpeg"",""png""]
    - 「企画書」「報告書」「プレゼン」→ [""docx"",""xlsx"",""pptx"",""pdf""]
    - 「データ」「集計」「CSV」→ [""xlsx"",""csv""]
    - 「画像」→ [""jpg"",""jpeg"",""png"",""gif"",""webp""]
    - 明示指定があればそれを優先
-6) mustPhrases は試験名/回次/固有ID/版数などの**強条件**を短く。
-7) terms は**短い日本語キーワード**（助詞・敬語は除外、最大5語、文はダメ）。
+5) 西暦/和暦/R7等の年は variants.year に入れる。terms/softTerms へは重複させない。
+6) terms は冗長な文を避け、検索に有効な短い日本語の短語のみ。softTerms は控えめに。
+7) 最大語数の目安: terms=8, softTerms=8, variants.year=4。
 
 【Few-shot】
 - 入力: ２年生の前期中間テストの数学の過去問ください
-  出力: {""terms"":[""数学"",""過去問"",""2年"",""前期""],""mustPhrases"":[""中間""],""extList"":[""pdf"",""jpg"",""jpeg"",""png""],""locationHints"":[],""pathLikes"":[],""dateRange"":{""kind"":""modified"",""from"":null,""to"":null},""limit"":5,""offset"":0}
+  出力: {""terms"":[""数学"",""過去問"",""2年"",""前期""],""softTerms"":[], ""extList"":[""pdf"",""jpg"",""jpeg"",""png""],""locationHints"":[],""pathLikes"":[],""dateRange"":{""kind"":""modified"",""from"":null,""to"":null},""limit"":5,""offset"":0,""variants"":{""year"":[],""term"":{}}}
 
 - 入力: OneDriveの企画書PRJ_123 最終版 今週
-  出力: {""terms"":[""企画書"",""最終版""],""mustPhrases"":[""PRJ_123""],""extList"":[""docx"",""xlsx"",""pptx"",""pdf""],""locationHints"":[""OneDrive""],""pathLikes"":[],""dateRange"":{""kind"":""modified"",""from"":""{{WEEK_START_ISO}}"",""to"":""{{WEEK_END_ISO}}""},""limit"":5,""offset"":0}
+  出力: {""terms"":[""企画書"",""最終版"",""PRJ_123""],""softTerms"":[], ""extList"":[""docx"",""xlsx"",""pptx"",""pdf""],""locationHints"":[""OneDrive""],""pathLikes"":[],""dateRange"":{""kind"":""modified"",""from"":""{{WEEK_START_ISO}}"",""to"":""{{WEEK_END_ISO}}""},""limit"":5,""offset"":0,""variants"":{""year"":[],""term"":{}}}
 
-- 入力: D:/レポート/2025年8月 売上.xlsx
-  出力: {""terms"":[""レポート"",""売上"",""2025年"",""8月""],""mustPhrases"":[],""extList"":[""xlsx""],""locationHints"":[],""pathLikes"":[""D:/レポート/%""],""dateRange"":{""kind"":""modified"",""from"":""2025-08-01"",""to"":""2025-09-01""},""limit"":5,""offset"":0}
+- 入力: R7 入学要項
+  出力: {""terms"":[""入学要項""],""softTerms"":[""募集要項"",""受験案内""],""extList"":[], ""locationHints"":[],""pathLikes"":[],""dateRange"":{""kind"":""modified"",""from"":null,""to"":null},""limit"":5,""offset"":0,""variants"":{""year"":[""R7"",""令和7年"",""令和七年"",""2025年""],""term"":{""入学要項"":[""募集要項"",""受験案内""]}}}
 
 【ユーザー入力】
 {USER_TEXT}

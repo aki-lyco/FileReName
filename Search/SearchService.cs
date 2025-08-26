@@ -43,14 +43,14 @@ namespace Explore.Search
             public string Tags { get; init; } = "";
             public double BaseScore { get; init; }
             public int TermScore { get; init; }
-            public int Stage1Score { get; init; }   // must/ext/date/path の加点合計
+            public int Stage1Score { get; init; }   // ext/date/path/bm25 の加点合計
         }
 
         // ===== 内部正規化モデル =====
         private sealed class Nq
         {
             public List<string> Terms { get; } = new();
-            public List<string> Must { get; } = new();
+            public List<string> SoftTerms { get; set; } = new(); // ← set を追加（代入可能に）
             public List<string> ExtList { get; } = new();
             public List<string> PathLikes { get; } = new();
             public string Kind { get; set; } = "modified";
@@ -179,10 +179,19 @@ COMMIT;";
             // 2) post（軽いクリップのみ）
             var nq = ParseAndPostProcess(json!);
             nq.RawText = rawText;
-            Debug($"[POST] terms=[{string.Join(",", nq.Terms)}] , must=[{string.Join(",", nq.Must)}] , ext=[{string.Join(",", nq.ExtList)}] , pathLikes=[{string.Join(",", nq.PathLikes)}]  date={nq.Kind}/{nq.FromUnix?.ToString() ?? "null"}-{nq.ToUnix?.ToString() ?? "null"}");
+            Debug($"[POST] terms=[{string.Join(",", nq.Terms)}] , soft=[{string.Join(",", nq.SoftTerms)}] , ext=[{string.Join(",", nq.ExtList)}] , pathLikes=[{string.Join(",", nq.PathLikes)}]  date={nq.Kind}/{nq.FromUnix?.ToString() ?? "null"}-{nq.ToUnix?.ToString() ?? "null"}");
 
             // 3) パイプライン
             using var con = Open();
+
+            // softTerms のDBヒット確認（ノイズ抑制）
+            {
+                var kept = await FilterTermsByDbAsync(con, nq.SoftTerms, ct);
+                nq.SoftTerms.Clear();
+                nq.SoftTerms.AddRange(kept);
+                Debug($"[POST/filter] soft_kept=[{string.Join(",", nq.SoftTerms)}]");
+            }
+
             long totalFiles = await ScalarAsync<long>(con, "SELECT COUNT(1) FROM files", ct);
             int seedLimit = totalFiles > 200 ? 200 : int.MaxValue;
 
@@ -204,7 +213,7 @@ COMMIT;";
                 }
             }
 
-            // 1) Stage1：must/ext/date/path の“加点式”で上位100件
+            // 1) Stage1：ext/date/path/bm25 の“加点式”で上位100件
             var hits1 = await ScoreTop100Async(con, nq, seed, ct);
             Debug($"[stage1] top100 by s1_score/base/mtime = {hits1.Count}");
 
@@ -236,7 +245,7 @@ COMMIT;";
             };
         }
 
-        // ====== seed/must/term/final ======
+        // ====== seed/term/final ======
         private static bool IsJson(string? s)
         {
             if (string.IsNullOrWhiteSpace(s)) return false;
@@ -249,25 +258,28 @@ COMMIT;";
             raw ??= "";
             // JSON 文字列として必要最小限のエスケープ
             var esc = raw.Replace("\\", "\\\\").Replace("\"", "\\\"");
-            return $"{{\"terms\":[\"{esc}\"],\"mustPhrases\":[],\"extList\":[],\"locationHints\":[],\"pathLikes\":[],\"dateRange\":{{\"kind\":\"modified\",\"from\":null,\"to\":null}},\"limit\":5,\"offset\":0}}";
+            // must を廃止し、softTerms/variants へ移行
+            return $"{{\"terms\":[\"{esc}\"],\"softTerms\":[],\"extList\":[],\"locationHints\":[],\"pathLikes\":[],\"dateRange\":{{\"kind\":\"modified\",\"from\":null,\"to\":null}},\"limit\":5,\"offset\":0,\"variants\":{{\"year\":[],\"term\":{{}}}}}}";
         }
 
         private static string EscapeLike(string s)
             => s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
         private static async Task<T> ScalarAsync<T>(SqliteConnection con, string sql) => await ScalarAsync<T>(con, sql, default);
         private static string EscapeFts(string s) => s.Replace("\"", "\"\"");
+
         private static bool ContainsCjk(string s) =>
             s.Any(ch =>
                 (ch >= 0x3040 && ch <= 0x30FF) || (ch >= 0x3400 && ch <= 0x9FFF) || (ch >= 0xF900 && ch <= 0xFAFF));
+
         private static bool QueryLooksCjk(Nq q)
-            => q.Terms.Any(ContainsCjk) || q.Must.Any(ContainsCjk);
+            => q.Terms.Any(ContainsCjk) || q.SoftTerms.Any(ContainsCjk);
 
         // 0) seed (FTS)
         private async Task<List<(long rowid, double baseScore, string snippet)>> SeedAsync(SqliteConnection con, Nq q, int limit, CancellationToken ct)
         {
             try
             {
-                string broad = BuildBroadMatch(q.Terms, q.Must);
+                string broad = BuildBroadMatch(q.Terms, q.SoftTerms);
                 var sql = $@"
 WITH seed AS (
   SELECT rowid,
@@ -292,23 +304,24 @@ SELECT rowid, base_score, snippet FROM seed;";
             catch { return new(); }
         }
 
-        private static string BuildBroadMatch(List<string> terms, List<string> must)
+        private static string BuildBroadMatch(List<string> terms, List<string> soft)
         {
             var parts = new List<string>();
             parts.AddRange(terms.Select(t => $"{EscapeFts(t)}*"));
-            parts.AddRange(must.Select(m => $"\"{EscapeFts(m)}\""));
+            parts.AddRange(soft.Select(s => $"{EscapeFts(s)}*"));
             return string.Join(" OR ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
         }
 
         // 0’) seed fallback (LIKE)
         private async Task<List<(long rowid, double baseScore, string snippet)>> SeedFallbackLikeAsync(SqliteConnection con, Nq q, int limit, CancellationToken ct)
         {
-            if (q.Terms.Count == 0) return new();
+            var all = q.Terms.Concat(q.SoftTerms).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (all.Count == 0) return new();
 
             var wh = new List<string>();
             var ps = new List<SqliteParameter>();
             int i = 0;
-            foreach (var t in q.Terms)
+            foreach (var t in all)
             {
                 var p = "%" + EscapeLike(t) + "%";
                 wh.Add($"(f.name LIKE $t{i} ESCAPE '\\' OR f.path LIKE $t{i} ESCAPE '\\')");
@@ -340,23 +353,15 @@ SELECT rowid, base_score, snippet FROM seed;";
             return list;
         }
 
-        // 1) Stage1：must/ext/date/path の“加点式”で上位100
+        // 1) Stage1：ext/date/path/bm25 の“加点式”で上位100
         private async Task<List<SearchRow>> ScoreTop100Async(SqliteConnection con, Nq q, List<(long rowid, double baseScore, string snippet)> seed, CancellationToken ct)
         {
             if (seed.Count == 0) return new();
 
             var ps = new List<SqliteParameter>();
 
-            // 必須句（must）: 命中ごとに +3
-            var s1 = new StringBuilder("0");
-            for (int i = 0; i < q.Must.Count; i++)
-            {
-                string p = "%" + EscapeLike(q.Must[i].ToLowerInvariant()) + "%";
-                s1.Append($" + (CASE WHEN (LOWER(f.name) LIKE $m{i} ESCAPE '\\' OR LOWER(f.path) LIKE $m{i} ESCAPE '\\') THEN 3 ELSE 0 END)");
-                ps.Add(new SqliteParameter($"$m{i}", p));
-            }
-
             // 拡張子: マッチで +2
+            var s1 = new StringBuilder("0");
             if (q.ExtList.Count > 0 && _hasExt)
             {
                 var inClause = string.Join(",", q.ExtList.Select((e, i) => $"$e{i}"));
@@ -453,7 +458,7 @@ SELECT * FROM hits;";
         {
             if (hits1.Count == 0) return new();
 
-            // ★ 重みを上げる：terms = +2 / must = +3
+            // ★ 重み設定：terms=+3 / soft=+1
             var sbScore = new StringBuilder();
             bool any = false;
             if (q.Terms.Count > 0)
@@ -461,15 +466,15 @@ SELECT * FROM hits;";
                 for (int i = 0; i < q.Terms.Count; i++)
                 {
                     if (any) sbScore.Append(" + "); any = true;
-                    sbScore.Append($"(CASE WHEN (LOWER(f.name) LIKE $t{i} OR LOWER(f.path) LIKE $t{i}) THEN 2 ELSE 0 END)");
+                    sbScore.Append($"(CASE WHEN (LOWER(f.name) LIKE $t{i} OR LOWER(f.path) LIKE $t{i}) THEN 3 ELSE 0 END)");
                 }
             }
-            if (q.Must.Count > 0)
+            if (q.SoftTerms.Count > 0)
             {
-                for (int i = 0; i < q.Must.Count; i++)
+                for (int i = 0; i < q.SoftTerms.Count; i++)
                 {
                     if (any) sbScore.Append(" + "); any = true;
-                    sbScore.Append($"(CASE WHEN (LOWER(f.name) LIKE $mu{i} OR LOWER(f.path) LIKE $mu{i}) THEN 3 ELSE 0 END)");
+                    sbScore.Append($"(CASE WHEN (LOWER(f.name) LIKE $s{i} OR LOWER(f.path) LIKE $s{i}) THEN 1 ELSE 0 END)");
                 }
             }
             if (!any) sbScore.Append("0");
@@ -504,8 +509,8 @@ SELECT * FROM hits;";
             cmd.CommandText = sql;
             for (int i = 0; i < q.Terms.Count; i++)
                 cmd.Parameters.AddWithValue($"$t{i}", "%" + q.Terms[i].ToLowerInvariant().Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%");
-            for (int i = 0; i < q.Must.Count; i++)
-                cmd.Parameters.AddWithValue($"$mu{i}", "%" + q.Must[i].ToLowerInvariant().Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%");
+            for (int i = 0; i < q.SoftTerms.Count; i++)
+                cmd.Parameters.AddWithValue($"$s{i}", "%" + q.SoftTerms[i].ToLowerInvariant().Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%");
 
             var list = new List<SearchRow>();
             using var r = await cmd.ExecuteReaderAsync(ct);
@@ -547,8 +552,8 @@ SELECT * FROM hits;";
                 var sni = L(h.Snippet);
                 var tag = L(h.Tags);
 
-                // terms + must を対象。列がある場合のみ加点。
-                IEnumerable<string> tokens = q.Terms.Concat(q.Must);
+                // terms + soft を対象。列がある場合のみ加点。
+                IEnumerable<string> tokens = q.Terms.Concat(q.SoftTerms);
                 foreach (var term in tokens)
                 {
                     var t = term?.Trim();
@@ -602,10 +607,28 @@ SELECT * FROM hits;";
                     if (e.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(e.GetString()))
                         nq.Terms.Add(e.GetString()!.Trim());
 
-            if (root.TryGetProperty("mustPhrases", out var must) && must.ValueKind == JsonValueKind.Array)
-                foreach (var e in must.EnumerateArray())
+            // mustPhrases は廃止
+
+            if (root.TryGetProperty("softTerms", out var soft) && soft.ValueKind == JsonValueKind.Array)
+                foreach (var e in soft.EnumerateArray())
                     if (e.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(e.GetString()))
-                        nq.Must.Add(e.GetString()!.Trim());
+                        nq.SoftTerms.Add(e.GetString()!.Trim());
+
+            // variants.year / variants.term[*] → SoftTerms に合流
+            if (root.TryGetProperty("variants", out var variants) && variants.ValueKind == JsonValueKind.Object)
+            {
+                if (variants.TryGetProperty("year", out var years) && years.ValueKind == JsonValueKind.Array)
+                    foreach (var y in years.EnumerateArray())
+                        if (y.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(y.GetString()))
+                            nq.SoftTerms.Add(y.GetString()!.Trim());
+
+                if (variants.TryGetProperty("term", out var termObj) && termObj.ValueKind == JsonValueKind.Object)
+                    foreach (var kv in termObj.EnumerateObject())
+                        if (kv.Value.ValueKind == JsonValueKind.Array)
+                            foreach (var v in kv.Value.EnumerateArray())
+                                if (v.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(v.GetString()))
+                                    nq.SoftTerms.Add(v.GetString()!.Trim());
+            }
 
             if (root.TryGetProperty("extList", out var exts) && exts.ValueKind == JsonValueKind.Array)
                 foreach (var e in exts.EnumerateArray())
@@ -647,10 +670,39 @@ SELECT * FROM hits;";
                 else nq.Terms.Add("検索");
             }
 
+            // SoftTerms 正規化：重複除去＆上限8語（※ここで List 丸ごと代入するので set が必要）
+            nq.SoftTerms = nq.SoftTerms
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList();
+
             var allow = new HashSet<string>(new[] { "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "gif", "webp", "txt", "md", "csv" });
             nq.ExtList.RemoveAll(e => !allow.Contains(e));
 
             return nq;
+        }
+
+        // ===== Helper: softTerms を DBヒットでふるいにかける =====
+        private async Task<List<string>> FilterTermsByDbAsync(SqliteConnection con, IEnumerable<string> candidates, CancellationToken ct)
+        {
+            var kept = new List<string>();
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = "SELECT 1 FROM files WHERE LOWER(name) LIKE $p ESCAPE '\\' OR LOWER(path) LIKE $p ESCAPE '\\' LIMIT 1";
+
+            foreach (var t in candidates
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.ToLowerInvariant().Trim())
+                .Distinct()
+                .Take(8))
+            {
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("$p", "%" + EscapeLike(t) + "%");
+                var obj = await cmd.ExecuteScalarAsync(ct);
+                if (obj != null && obj != DBNull.Value) kept.Add(t);
+            }
+            return kept;
         }
     }
 }

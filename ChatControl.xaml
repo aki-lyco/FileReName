@@ -222,11 +222,7 @@
 				<TextBlock Text="Chat" FontSize="15" FontWeight="SemiBold" Foreground="#444" Margin="4,0,0,0"/>
 			</StackPanel>
 
-			<WrapPanel Grid.Column="1" VerticalAlignment="Center">
-				<ToggleButton Content="チャット" IsChecked="True" Style="{StaticResource ToolbarToggle}"/>
-				<ToggleButton Content="デバッグ" Style="{StaticResource ToolbarToggle}"/>
-				<ToggleButton Content="検索" Style="{StaticResource ToolbarToggle}"/>
-			</WrapPanel>
+			<!-- 右側のボタン（チャット/デバッグ/検索）は削除しました -->
 		</Grid>
 
 		<!-- ===== Messages ===== -->

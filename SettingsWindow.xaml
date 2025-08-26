@@ -47,7 +47,7 @@
 							<TextBlock Text="鮮度（Freshness）状態一覧"
                                        FontSize="16" FontWeight="SemiBold" />
 							<TextBlock Margin="0,6,0,0" TextWrapping="Wrap">
-								ファイルとインデックス（DB）の同期状態を示す**状態**です。下表の基準で判定されます。
+								ファイルとインデックス（DB）の同期状態を示すものです。下表の基準で判定されます。
 							</TextBlock>
 
 							<!-- 表（指標 / 状態名 / 説明） -->
