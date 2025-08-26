@@ -26,9 +26,56 @@ using WpfDataObject = System.Windows.DataObject;
 using WpfDataFormats = System.Windows.DataFormats;
 using WpfDragDrop = System.Windows.DragDrop;
 using WpfDragDropEffects = System.Windows.DragDropEffects;
+// ↓ 追加：あいまいさ回避
+using WpfBinding = System.Windows.Data.Binding;
+using WpfButton = System.Windows.Controls.Button;
 
 namespace Explore
 {
+    // ===== パンくず用モデル / コンバータ =====
+    public record BreadcrumbItem(string Name, string FullPath, bool IsLast);
+
+    public sealed class PathToBreadcrumbConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            var path = value as string;
+            if (string.IsNullOrWhiteSpace(path)) return Array.Empty<BreadcrumbItem>();
+
+            path = Path.GetFullPath(path.TrimEnd('\\'));
+            var items = new List<BreadcrumbItem>();
+
+            var root = Path.GetPathRoot(path) ?? "";
+            if (!string.IsNullOrEmpty(root))
+                items.Add(new BreadcrumbItem(root.TrimEnd('\\'), root, false));
+
+            var remain = path.Substring(root.Length).Trim('\\');
+            if (remain.Length > 0)
+            {
+                var parts = remain.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+                var acc = root;
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    var seg = parts[i];
+                    acc = Path.Combine(acc, seg);
+                    items.Add(new BreadcrumbItem(seg, acc, i == parts.Length - 1));
+                }
+                if (items.Count > 0)
+                    items[0] = items[0] with { IsLast = items.Count == 1 };
+            }
+            else
+            {
+                if (items.Count > 0)
+                    items[0] = items[0] with { IsLast = true };
+            }
+            return items;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            => WpfBinding.DoNothing; // ← 変更：WPF Binding を明示
+    }
+    // ==========================================
+
     public partial class FilesControl : System.Windows.Controls.UserControl, INotifyPropertyChanged
     {
         // ========= セッション内だけ保持するUI状態メモリ =========
@@ -448,8 +495,6 @@ namespace Explore
                 await RefreshCurrentFolderViewAsync();
         }
 
-
-
         private static bool ConfirmDelete(string title, IEnumerable<string> paths)
         {
             var list = paths.ToList();
@@ -510,7 +555,6 @@ namespace Explore
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
-
         private static string? GetPathFromContext(object? sender)
         {
             if (sender is MenuItem mi && mi.DataContext is FileRow r1) return r1.FullPath;
@@ -538,8 +582,8 @@ namespace Explore
                     var fi = new FileInfo(path);
                     rec = new DbFileRecord
                     {
-                        FileKey = FileKeyUtil.GetStableKey(fi.FullName), // ← FullName
-                        Path = fi.FullName,                               // ← FullName
+                        FileKey = FileKeyUtil.GetStableKey(fi.FullName),
+                        Path = fi.FullName,
                         Parent = fi.DirectoryName,
                         Name = fi.Name,
                         Ext = fi.Extension,
@@ -684,11 +728,7 @@ namespace Explore
 
             // ← 追加：右ペインも新フォルダに移動（中身が見える）
             await NavigateAndFillAsync(created);
-
-            // ※「作成後にそのまま親フォルダに留まりたい」場合は、上の2行のうち
-            //   NavigateAndFillAsync(created) をコメントアウトしてください。
         }
-
 
         private async void OnNewTextClick(object? sender, RoutedEventArgs e)
             => await CreateTextLikeAsync("新しいテキスト ドキュメント.txt", "");
@@ -1001,7 +1041,6 @@ namespace Explore
                 await ForceRefreshFolderNodeAsync(parent);
         }
 
-
         // ★ 指定パスのフォルダノードの子を強制的に差し替え
         private async Task ForceRefreshFolderNodeAsync(string folderPath)
         {
@@ -1270,8 +1309,8 @@ namespace Explore
             var fi = new FileInfo(path);
             return new DbFileRecord
             {
-                FileKey = FileKeyUtil.GetStableKey(fi.FullName), // ← FullName
-                Path = fi.FullName,                               // ← FullName
+                FileKey = FileKeyUtil.GetStableKey(fi.FullName),
+                Path = fi.FullName,
                 Parent = fi.DirectoryName,
                 Name = fi.Name,
                 Ext = fi.Extension,
@@ -1325,6 +1364,13 @@ VALUES($k,$o,$n,'move',NULL,$t)";
             cmd.Parameters.AddWithValue("$n", newPath);
             cmd.Parameters.AddWithValue("$t", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        // ===== パンくず クリック =====
+        private async void OnBreadcrumbClick(object sender, RoutedEventArgs e)
+        {
+            if (sender is WpfButton b && b.Tag is string p && Directory.Exists(p)) // ← 変更：WpfButton で判定
+                await NavigateAndFillAsync(p);
         }
 
         // ===== 汎用 =====
