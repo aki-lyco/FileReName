@@ -28,11 +28,11 @@ using WpfDragDrop = System.Windows.DragDrop;
 using WpfDragDropEffects = System.Windows.DragDropEffects;
 using WpfBinding = System.Windows.Data.Binding;
 using WpfButton = System.Windows.Controls.Button;
-using WpfCheckBox = System.Windows.Controls.CheckBox;   // ← 追加：WPFのCheckBoxを明示
+using WpfCheckBox = System.Windows.Controls.CheckBox;
 
 namespace Explore
 {
-    // パンくず用モデル / コンバータ（C: → C:\ 正規化対応）
+    // パンくず
     public record BreadcrumbItem(string Name, string FullPath, bool IsLast);
 
     public sealed class PathToBreadcrumbConverter : IValueConverter
@@ -64,7 +64,7 @@ namespace Explore
             var parts = remain.Split('\\', StringSplitOptions.RemoveEmptyEntries);
             for (int i = 0; i < parts.Length; i++)
             {
-                acc = Path.Combine(acc, parts[i]);
+                acc = System.IO.Path.Combine(acc, parts[i]);
                 items.Add(new BreadcrumbItem(parts[i], acc, i == parts.Length - 1));
             }
             return items;
@@ -125,6 +125,8 @@ namespace Explore
 
             FolderTree.PreviewMouseLeftButtonDown += OnFolderTree_PreviewMouseLeftButtonDown_ForDrag;
             FolderTree.PreviewMouseMove += OnFolderTree_PreviewMouseMove_ForDrag;
+            FolderTree.PreviewMouseRightButtonDown += FolderTree_PreviewMouseRightButtonDown;
+            FolderTree.ContextMenuOpening += FolderTree_ContextMenuOpening;
 
             BtnNewCreate.Click += OnNewButtonClick;
             BtnIndex.Click += OnIndexCurrentFolderClick;
@@ -134,11 +136,12 @@ namespace Explore
             FilesGrid.MouseDoubleClick += OnFilesGridDoubleClick;
             FilesGrid.KeyDown += OnFilesGridKeyDown;
 
-            FilesGrid.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnFilesGridMenuClick));
-            FolderTree.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnFolderTreeMenuClick));
-
             FilesGrid.PreviewMouseLeftButtonDown += OnFilesGrid_PreviewMouseLeftButtonDown_ForDrag;
             FilesGrid.PreviewMouseMove += OnFilesGrid_PreviewMouseMove_ForDrag;
+
+            // 右クリック：行選択＋メニュー生成
+            FilesGrid.PreviewMouseRightButtonDown += FilesGrid_PreviewMouseRightButtonDown;
+            FilesGrid.ContextMenuOpening += FilesGrid_ContextMenuOpening;
 
             this.AllowDrop = true;
             this.DragOver += OnRootDragOver;
@@ -178,18 +181,10 @@ namespace Explore
             public DateTime LastWriteTime { get; init; }
 
             private bool _isChecked;
-            public bool IsChecked
-            {
-                get => _isChecked;
-                set { if (_isChecked != value) { _isChecked = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsChecked))); } }
-            }
+            public bool IsChecked { get => _isChecked; set { if (_isChecked != value) { _isChecked = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsChecked))); } } }
 
             private FreshState _fresh = FreshState.Unindexed;
-            public FreshState FreshState
-            {
-                get => _fresh;
-                set { if (_fresh != value) { _fresh = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FreshState))); } }
-            }
+            public FreshState FreshState { get => _fresh; set { if (_fresh != value) { _fresh = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FreshState))); } } }
 
             public event PropertyChangedEventHandler? PropertyChanged;
         }
@@ -269,7 +264,7 @@ namespace Explore
                     IndexStatusText = $"登録中 {p.scanned:N0} 件（新規 {p.inserted:N0}）");
 
                 var records = EnumerateRecordsAsync(root!, recursive: false, _indexCts.Token);
-                var (_, inserted) = await _db.BulkUpsertAsync(records, batchSize: 500, progress: prog, ct: _indexCts.Token);
+                var (_, _) = await _db.BulkUpsertAsync(records, batchSize: 500, progress: prog, ct: _indexCts.Token);
 
                 IndexedCountText = $"DB件数: {await GetTableCountAsync("files"):N0}";
                 IndexStatusText = "完了";
@@ -341,7 +336,6 @@ namespace Explore
         {
             if (e.Key == WpfInput.Key.Space)
             {
-                // Space で選択行のチェック反転
                 foreach (var r in FilesGrid.SelectedItems.OfType<FileRow>())
                     r.IsChecked = !r.IsChecked;
                 e.Handled = true;
@@ -355,31 +349,117 @@ namespace Explore
             }
         }
 
-        // 行メニュー（Tagで振り分け）
+        //========================
+        // 右クリックメニュー（DataGrid）
+        //========================
+        private void FilesGrid_PreviewMouseRightButtonDown(object sender, WpfInput.MouseButtonEventArgs e)
+        {
+            // 右クリックした行を選択状態にする
+            var pos = e.GetPosition(FilesGrid);
+            var dc = FindDataContext<FileRow>(FilesGrid.InputHitTest(pos) as DependencyObject);
+            if (dc != null)
+            {
+                FilesGrid.SelectedItem = dc;
+            }
+        }
+
+        private void FilesGrid_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+        {
+            var pos = WpfInput.Mouse.GetPosition(FilesGrid);
+            var row = FindDataContext<FileRow>(FilesGrid.InputHitTest(pos) as DependencyObject);
+
+            if (row == null)
+            {
+                FilesGrid.ContextMenu = null;
+                e.Handled = true;
+                return;
+            }
+
+            FilesGrid.ContextMenu = BuildRowContextMenu(row);
+        }
+
+        private ContextMenu BuildRowContextMenu(FileRow fr)
+        {
+            var cm = new ContextMenu();
+
+            MenuItem MI(string header, string tag)
+            {
+                var m = new MenuItem { Header = header, Tag = tag, CommandParameter = fr.FullPath };
+                m.Click += OnFilesGridMenuClick;
+                return m;
+            }
+
+            cm.Items.Add(MI("開く", "OpenFile"));
+            cm.Items.Add(MI("場所を開く", "OpenLocation"));
+            cm.Items.Add(new Separator());
+            cm.Items.Add(MI("差分のみ Index（このファイル）", "ReindexFile"));
+            cm.Items.Add(MI("DBレコード削除", "DeleteDbRecord"));
+            cm.Items.Add(new Separator());
+            cm.Items.Add(MI("ゴミ箱に移動", "DeleteFile"));
+            return cm;
+        }
+
+        // 行メニュー共通ハンドラ
         private void OnFilesGridMenuClick(object? sender, RoutedEventArgs e)
         {
-            if (e.OriginalSource is not MenuItem mi) return;
+            if (sender is not MenuItem mi) return;
             var tag = mi.Tag as string ?? "";
-            var path = (mi.CommandParameter as string)
-                       ?? (mi.DataContext as FileRow)?.FullPath;
+            var path = mi.CommandParameter as string;
             if (string.IsNullOrWhiteSpace(path)) return;
 
             switch (tag)
             {
                 case "OpenFile": OpenFile(path); break;
-                case "DeleteFile": _ = DeleteFilesAsync(new[] { path }); break;
+                case "OpenLocation": OpenLocation(path); break;
                 case "ReindexFile": _ = ReindexOneAsync(path); break;
                 case "DeleteDbRecord": _ = DeleteDbRecordAsync(path); break;
-                case "OpenLocation": OpenLocation(path); break;
+                case "DeleteFile": _ = DeleteFilesAsync(new[] { path }); break;
             }
         }
 
-        // ツリーメニュー
+        //========================
+        // 右クリックメニュー（TreeView）
+        //========================
+        private void FolderTree_PreviewMouseRightButtonDown(object sender, WpfInput.MouseButtonEventArgs e)
+        {
+            // 右クリックしたノードを選択
+            var pos = e.GetPosition(FolderTree);
+            var node = FindDataContext<FolderNode>(FolderTree.InputHitTest(pos) as DependencyObject);
+            if (node != null)
+            {
+                var tvi = FindAncestor<TreeViewItem>(FolderTree.InputHitTest(pos) as DependencyObject);
+                if (tvi != null) tvi.IsSelected = true;
+            }
+        }
+
+        private void FolderTree_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+        {
+            var pos = WpfInput.Mouse.GetPosition(FolderTree);
+            var node = FindDataContext<FolderNode>(FolderTree.InputHitTest(pos) as DependencyObject);
+
+            if (node == null)
+            {
+                FolderTree.ContextMenu = null;
+                e.Handled = true;
+                return;
+            }
+
+            var cm = new ContextMenu();
+            var mi = new MenuItem
+            {
+                Header = "ゴミ箱に移動",
+                Tag = "DeleteFolder",
+                CommandParameter = node.FullPath
+            };
+            mi.Click += OnFolderTreeMenuClick;
+            cm.Items.Add(mi);
+            FolderTree.ContextMenu = cm;
+        }
+
         private void OnFolderTreeMenuClick(object? sender, RoutedEventArgs e)
         {
-            if (e.OriginalSource is not MenuItem mi) return;
-            var tag = mi.Tag as string ?? "";
-            if (tag != "DeleteFolder") return;
+            if (sender is not MenuItem mi) return;
+            if ((mi.Tag as string) != "DeleteFolder") return;
 
             var path = mi.CommandParameter as string;
             if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
@@ -390,14 +470,14 @@ namespace Explore
         // ヘッダーの「全選択/全解除」
         private void OnHeaderCheckAllClick(object sender, RoutedEventArgs e)
         {
-            if (sender is WpfCheckBox cb)   // ← ここでWPFのCheckBoxを使用
+            if (sender is WpfCheckBox cb)
             {
                 bool v = cb.IsChecked == true;
                 foreach (var r in Rows) r.IsChecked = v;
             }
         }
 
-        // 操作実体
+        // 操作実体（開く/場所/Index/削除系）はそのまま
         private void OpenFile(string path)
         {
             try
@@ -434,7 +514,7 @@ namespace Explore
             try
             {
                 await UpsertFileFromFsAsync(path, CancellationToken.None);
-                var dir = Path.GetDirectoryName(path) ?? _vm.CurrentPath ?? "";
+                var dir = System.IO.Path.GetDirectoryName(path) ?? _vm.CurrentPath ?? "";
                 _fresh.InvalidateFreshnessCache(dir);
                 await RefreshRowsFreshnessAsync(dir);
                 _ = RecalcFreshnessPercentAsync(dir);
@@ -450,7 +530,7 @@ namespace Explore
             try
             {
                 await DeleteByPathAsync(path, CancellationToken.None);
-                var dir = Path.GetDirectoryName(path) ?? _vm.CurrentPath ?? "";
+                var dir = System.IO.Path.GetDirectoryName(path) ?? _vm.CurrentPath ?? "";
                 _fresh.InvalidateFreshnessCache(dir);
                 await RefreshRowsFreshnessAsync(dir);
                 _ = RecalcFreshnessPercentAsync(dir);
@@ -492,7 +572,7 @@ namespace Explore
         {
             if (!ConfirmDelete("フォルダーをゴミ箱へ移動", new[] { path })) return;
 
-            var parent = Path.GetDirectoryName(path);
+            var parent = System.IO.Path.GetDirectoryName(path);
 
             await DeleteToRecycleBinAsync(new[] { path });
 
@@ -510,7 +590,7 @@ namespace Explore
         private static bool ConfirmDelete(string title, IEnumerable<string> paths)
         {
             var list = paths.ToList();
-            var first10 = list.Take(10).Select(p => "・" + Path.GetFileName(p));
+            var first10 = list.Take(10).Select(p => "・" + System.IO.Path.GetFileName(p));
             var more = list.Count - 10;
             var msg = "以下をWindowsのごみ箱へ移動します。よろしいですか？\n\n"
                       + string.Join("\n", first10)
@@ -549,12 +629,11 @@ namespace Explore
 
         private async Task DeleteRecordsUnderAsync(string dir, CancellationToken ct)
         {
-            static string EscapeLike(string s) => s
-                .Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+            static string EscapeLike(string s) => s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
             var prefix = EscapeLike(
-                Path.GetFullPath(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
-                + Path.DirectorySeparatorChar);
+                System.IO.Path.GetFullPath(dir.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar))
+                + System.IO.Path.DirectorySeparatorChar);
 
             await using var conn = OpenConn();
             await conn.OpenAsync(ct);
@@ -565,15 +644,9 @@ namespace Explore
         }
 
         // ユーティリティ
-        private async IAsyncEnumerable<DbFileRecord> EnumerateRecordsAsync(
-            string root, bool recursive, [EnumeratorCancellation] CancellationToken ct)
+        private async IAsyncEnumerable<DbFileRecord> EnumerateRecordsAsync(string root, bool recursive, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
         {
-            var opts = new EnumerationOptions
-            {
-                RecurseSubdirectories = recursive,
-                IgnoreInaccessible = true,
-                AttributesToSkip = FileAttributes.Hidden | FileAttributes.System
-            };
+            var opts = new EnumerationOptions { RecurseSubdirectories = recursive, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.Hidden | FileAttributes.System };
 
             foreach (var path in Directory.EnumerateFiles(root, "*", opts))
             {
@@ -649,7 +722,7 @@ namespace Explore
             await NavigateAndFillAsync(root);
         }
 
-        #region 新規作成メニュー
+        #region 新規作成メニュー（同）
         private void OnNewButtonClick(object? sender, RoutedEventArgs e)
         {
             if (sender is not FrameworkElement fe) return;
@@ -680,12 +753,7 @@ namespace Explore
             var dir = GetTargetDirectory();
             if (dir == null) return;
 
-            var dlg = new Microsoft.Win32.OpenFileDialog
-            {
-                Title = "追加するファイルを選択",
-                Multiselect = true,
-                CheckFileExists = true
-            };
+            var dlg = new Microsoft.Win32.OpenFileDialog { Title = "追加するファイルを選択", Multiselect = true, CheckFileExists = true };
             if (dlg.ShowDialog() == true)
             {
                 int ok = 0, fail = 0;
@@ -693,7 +761,7 @@ namespace Explore
                 {
                     try
                     {
-                        var name = Path.GetFileName(src);
+                        var name = System.IO.Path.GetFileName(src);
                         var dst = GetUniquePath(dir, name);
                         File.Copy(src, dst);
                         ok++;
@@ -713,9 +781,9 @@ namespace Explore
             var baseName = "新しいフォルダー";
             var name = baseName;
             int i = 2;
-            while (Directory.Exists(Path.Combine(dir, name))) name = $"{baseName} ({i++})";
+            while (Directory.Exists(System.IO.Path.Combine(dir, name))) name = $"{baseName} ({i++})";
 
-            var created = Path.Combine(dir, name);
+            var created = System.IO.Path.Combine(dir, name);
             Directory.CreateDirectory(created);
 
             await ForceRefreshFolderNodeAsync(dir);
@@ -779,15 +847,15 @@ namespace Explore
 
         private static string GetUniquePath(string dir, string fileName)
         {
-            var path = Path.Combine(dir, fileName);
+            var path = System.IO.Path.Combine(dir, fileName);
             if (!File.Exists(path) && !Directory.Exists(path)) return path;
 
-            var name = Path.GetFileNameWithoutExtension(fileName);
-            var ext = Path.GetExtension(fileName);
+            var name = System.IO.Path.GetFileNameWithoutExtension(fileName);
+            var ext = System.IO.Path.GetExtension(fileName);
             int i = 2;
             while (true)
             {
-                var candidate = Path.Combine(dir, $"{name} ({i}){ext}");
+                var candidate = System.IO.Path.Combine(dir, $"{name} ({i}){ext}");
                 if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
                 i++;
             }
@@ -822,7 +890,7 @@ namespace Explore
         {
             try
             {
-                var rootPath = Path.GetPathRoot(path) ?? "";
+                var rootPath = System.IO.Path.GetPathRoot(path) ?? "";
                 var root = _vm.Roots.FirstOrDefault(r =>
                     string.Equals(r.FullPath, rootPath, StringComparison.OrdinalIgnoreCase));
                 if (root == null) return false;
@@ -833,13 +901,13 @@ namespace Explore
                 var remain = path.Substring(rootPath.Length).Trim('\\');
                 if (remain.Length == 0) return true;
 
-                var parts = remain.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                var parts = remain.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)
                                   .Where(s => !string.IsNullOrWhiteSpace(s));
 
                 var current = root;
                 foreach (var part in parts)
                 {
-                    var nextFull = Path.Combine(current.FullPath, part);
+                    var nextFull = System.IO.Path.Combine(current.FullPath, part);
                     var next = current.Children.FirstOrDefault(c =>
                         string.Equals(c.FullPath, nextFull, StringComparison.OrdinalIgnoreCase));
                     if (next == null)
@@ -905,7 +973,7 @@ namespace Explore
             var node = FindDataContext<FolderNode>(_dragOriginVisual);
             if (node == null || string.IsNullOrWhiteSpace(node.FullPath) || !Directory.Exists(node.FullPath)) return;
 
-            if (string.IsNullOrWhiteSpace(Path.GetDirectoryName(node.FullPath))) return;
+            if (string.IsNullOrWhiteSpace(System.IO.Path.GetDirectoryName(node.FullPath))) return;
 
             var data = new WpfDataObject();
             data.SetData(WpfDataFormats.FileDrop, new[] { node.FullPath });
@@ -961,7 +1029,7 @@ namespace Explore
                 await _vm.RefreshAsync();
                 await RefreshTreeAfterMoveAsync(paths, destDir!);
 
-                var srcParents = paths.Select(p => Directory.Exists(p) ? p : Path.GetDirectoryName(p))
+                var srcParents = paths.Select(p => Directory.Exists(p) ? p : System.IO.Path.GetDirectoryName(p))
                                       .Where(d => !string.IsNullOrWhiteSpace(d))
                                       .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 foreach (var d in srcParents) _fresh.InvalidateFreshnessCache(d!);
@@ -980,7 +1048,7 @@ namespace Explore
 
             foreach (var src in sources)
             {
-                var p = Path.GetDirectoryName(src?.TrimEnd(Path.DirectorySeparatorChar) ?? "");
+                var p = System.IO.Path.GetDirectoryName(src?.TrimEnd(System.IO.Path.DirectorySeparatorChar) ?? "");
                 if (!string.IsNullOrWhiteSpace(p)) parents.Add(p);
             }
             parents.Add(destDir);
@@ -1055,7 +1123,7 @@ namespace Explore
                 }
                 catch (Exception ex)
                 {
-                    errors.Add($"{Path.GetFileName(src.TrimEnd(Path.DirectorySeparatorChar))} : {ex.Message}");
+                    errors.Add($"{System.IO.Path.GetFileName(src.TrimEnd(System.IO.Path.DirectorySeparatorChar))} : {ex.Message}");
                 }
             }
 
@@ -1069,8 +1137,8 @@ namespace Explore
 
         private async Task MoveOneFileAsync(string src, string destDir)
         {
-            var name = Path.GetFileName(src);
-            var destPath = Path.Combine(destDir, name);
+            var name = System.IO.Path.GetFileName(src);
+            var destPath = System.IO.Path.Combine(destDir, name);
             if (string.Equals(src, destPath, StringComparison.OrdinalIgnoreCase)) return;
 
             destPath = EnsureUniqueFilePath(destPath);
@@ -1090,22 +1158,22 @@ namespace Explore
 
         private async Task MoveOneDirectoryAsync(string srcDir, string destParent)
         {
-            if (string.IsNullOrWhiteSpace(Path.GetDirectoryName(srcDir)))
+            if (string.IsNullOrWhiteSpace(System.IO.Path.GetDirectoryName(srcDir)))
                 throw new InvalidOperationException("このフォルダーは移動できません。");
 
-            var finalDest = Path.Combine(destParent, Path.GetFileName(srcDir.TrimEnd(Path.DirectorySeparatorChar)));
+            var finalDest = System.IO.Path.Combine(destParent, System.IO.Path.GetFileName(srcDir.TrimEnd(System.IO.Path.DirectorySeparatorChar)));
             finalDest = EnsureUniqueDirectoryPath(finalDest);
 
             var oldFiles = EnumerateAllFiles(srcDir).ToList();
             var mapping = new List<(string oldPath, string newPath, string oldKey)>(oldFiles.Count);
             foreach (var oldPath in oldFiles)
             {
-                var rel = Path.GetRelativePath(srcDir, oldPath);
-                var newPath = Path.Combine(finalDest, rel);
+                var rel = System.IO.Path.GetRelativePath(srcDir, oldPath);
+                var newPath = System.IO.Path.Combine(finalDest, rel);
                 mapping.Add((oldPath, newPath, FileKeyUtil.GetStableKey(oldPath)));
             }
 
-            var sameVolume = string.Equals(Path.GetPathRoot(srcDir), Path.GetPathRoot(destParent), StringComparison.OrdinalIgnoreCase);
+            var sameVolume = string.Equals(System.IO.Path.GetPathRoot(srcDir), System.IO.Path.GetPathRoot(destParent), StringComparison.OrdinalIgnoreCase);
             if (sameVolume) Directory.Move(srcDir, finalDest);
             else
             {
@@ -1131,12 +1199,12 @@ namespace Explore
         private static string EnsureUniqueFilePath(string destPath)
         {
             if (!File.Exists(destPath)) return destPath;
-            var dir = Path.GetDirectoryName(destPath)!;
-            var baseName = Path.GetFileNameWithoutExtension(destPath);
-            var ext = Path.GetExtension(destPath);
+            var dir = System.IO.Path.GetDirectoryName(destPath)!;
+            var baseName = System.IO.Path.GetFileNameWithoutExtension(destPath);
+            var ext = System.IO.Path.GetExtension(destPath);
             for (int i = 1; ; i++)
             {
-                var cand = Path.Combine(dir, $"{baseName} ({i}){ext}");
+                var cand = System.IO.Path.Combine(dir, $"{baseName} ({i}){ext}");
                 if (!File.Exists(cand)) return cand;
             }
         }
@@ -1144,22 +1212,22 @@ namespace Explore
         private static string EnsureUniqueDirectoryPath(string destPath)
         {
             if (!Directory.Exists(destPath)) return destPath;
-            var dir = Path.GetDirectoryName(destPath)!;
-            var name = Path.GetFileName(destPath.TrimEnd(Path.DirectorySeparatorChar));
+            var dir = System.IO.Path.GetDirectoryName(destPath)!;
+            var name = System.IO.Path.GetFileName(destPath.TrimEnd(System.IO.Path.DirectorySeparatorChar));
             for (int i = 1; ; i++)
             {
-                var cand = Path.Combine(dir, $"{name} ({i})");
+                var cand = System.IO.Path.Combine(dir, $"{name} ({i})");
                 if (!Directory.Exists(cand)) return cand;
             }
         }
 
         private static void SafeFileMove(string src, string dest)
         {
-            var sameVolume = string.Equals(Path.GetPathRoot(src), Path.GetPathRoot(dest), StringComparison.OrdinalIgnoreCase);
+            var sameVolume = string.Equals(System.IO.Path.GetPathRoot(src), System.IO.Path.GetPathRoot(dest), StringComparison.OrdinalIgnoreCase);
             if (sameVolume) File.Move(src, dest);
             else
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(dest)!);
                 File.Copy(src, dest, overwrite: false);
                 File.Delete(src);
             }
@@ -1185,18 +1253,18 @@ namespace Explore
 
                     foreach (var file in Directory.GetFiles(s))
                     {
-                        var dstFile = Path.Combine(d, Path.GetFileName(file));
+                        var dstFile = System.IO.Path.Combine(d, System.IO.Path.GetFileName(file));
                         File.Copy(file, dstFile, overwrite: false);
                     }
                     foreach (var sub in Directory.GetDirectories(s))
-                        stack.Push((sub, Path.Combine(d, Path.GetFileName(sub))));
+                        stack.Push((sub, System.IO.Path.Combine(d, System.IO.Path.GetFileName(sub))));
                 }
             });
         }
 
         private static bool IsSubPath(string parent, string candidate)
         {
-            static string Norm(string p) => Path.GetFullPath(p.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + Path.DirectorySeparatorChar;
+            static string Norm(string p) => System.IO.Path.GetFullPath(p.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)) + System.IO.Path.DirectorySeparatorChar;
             var p0 = Norm(parent);
             var c0 = Norm(candidate);
             return c0.StartsWith(p0, StringComparison.OrdinalIgnoreCase);
@@ -1275,7 +1343,7 @@ VALUES($k,$o,$n,'move',NULL,$t)";
                 await NavigateAndFillAsync(p);
         }
 
-        // 汎用
+        // ヒットテスト系ユーティリティ
         private FolderNode? HitFolderNode(WpfPoint p)
         {
             var hit = this.InputHitTest(p) as DependencyObject;
@@ -1290,6 +1358,13 @@ VALUES($k,$o,$n,'move',NULL,$t)";
                 start = VisualTreeHelper.GetParent(start);
             }
             return null;
+        }
+
+        private static T? FindAncestor<T>(DependencyObject? start) where T : DependencyObject
+        {
+            while (start != null && start is not T)
+                start = VisualTreeHelper.GetParent(start);
+            return start as T;
         }
     }
 }

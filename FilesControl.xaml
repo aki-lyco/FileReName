@@ -12,33 +12,17 @@
 		<!-- パンくず -->
 		<local:PathToBreadcrumbConverter x:Key="PathToBreadcrumb" />
 
-		<!-- DataGrid の行スタイル -->
+		<!-- DataGrid の行スタイル（見た目のみ。右クリメニューはコードで生成） -->
 		<Style TargetType="{x:Type DataGridRow}">
 			<Setter Property="Padding" Value="10,2"/>
 			<Setter Property="BorderBrush" Value="#EEE"/>
 			<Setter Property="BorderThickness" Value="0,0,0,1"/>
 		</Style>
 
-		<!-- 行右クリックメニュー -->
-		<ContextMenu x:Key="FilesRowMenu">
-			<MenuItem Header="開く" Tag="OpenFile" CommandParameter="{Binding FullPath}" />
-			<MenuItem Header="場所を開く" Tag="OpenLocation" CommandParameter="{Binding FullPath}" />
-			<Separator/>
-			<MenuItem Header="差分のみ Index（このファイル）" Tag="ReindexFile" CommandParameter="{Binding FullPath}" />
-			<MenuItem Header="DBレコード削除" Tag="DeleteDbRecord" CommandParameter="{Binding FullPath}" />
-			<Separator/>
-			<MenuItem Header="ゴミ箱に移動" Tag="DeleteFile" CommandParameter="{Binding FullPath}" />
-		</ContextMenu>
-
-		<!-- フォルダツリーの右クリックメニュー -->
-		<ContextMenu x:Key="FolderTreeMenu">
-			<MenuItem Header="ゴミ箱に移動" Tag="DeleteFolder" CommandParameter="{Binding FullPath}" />
-		</ContextMenu>
-
+		<!-- ツリーの見た目（右クリメニューはコードで生成） -->
 		<Style TargetType="{x:Type TreeViewItem}" x:Key="FolderTreeItemStyle">
 			<Setter Property="Padding" Value="6,2"/>
 			<Setter Property="IsExpanded" Value="False"/>
-			<Setter Property="ContextMenu" Value="{StaticResource FolderTreeMenu}" />
 		</Style>
 	</UserControl.Resources>
 
@@ -137,12 +121,9 @@
                           EnableRowVirtualization="True"
                           EnableColumnVirtualization="True"
                           ScrollViewer.CanContentScroll="True"
-                          RowHeaderWidth="0">
-					<DataGrid.RowStyle>
-						<Style TargetType="{x:Type DataGridRow}" BasedOn="{StaticResource {x:Type DataGridRow}}">
-							<Setter Property="ContextMenu" Value="{StaticResource FilesRowMenu}" />
-						</Style>
-					</DataGrid.RowStyle>
+                          RowHeaderWidth="0"
+                          ContextMenuOpening="FilesGrid_ContextMenuOpening"
+                          PreviewMouseRightButtonDown="FilesGrid_PreviewMouseRightButtonDown">
 					<DataGrid.Columns>
 						<!-- 左端チェック列（ヘッダーで全選択/全解除） -->
 						<DataGridTemplateColumn Width="40" IsReadOnly="False">
