@@ -430,13 +430,25 @@ namespace Explore
             if (!ConfirmDelete("フォルダーをゴミ箱へ移動", new[] { path })) return;
 
             var parent = Path.GetDirectoryName(path);
+
+            // 物理削除（ゴミ箱へ）
             await DeleteToRecycleBinAsync(new[] { path });
 
-            if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
-                await NavigateAndFillAsync(parent);
+            // DBの掃除（削除したフォルダ配下を丸ごと削除）
+            try { await DeleteRecordsUnderAsync(path, CancellationToken.None); } catch { /* best effort */ }
+
+            // ツリー更新（親ノードの子一覧を作り直す）
+            if (!string.IsNullOrWhiteSpace(parent))
+                await ForceRefreshFolderNodeAsync(parent!);
+
+            // 右ペインの更新：もし今見ている場所が削除フォルダ配下なら親へ移動
+            if (!string.IsNullOrWhiteSpace(_vm?.CurrentPath) && IsSubPath(path, _vm.CurrentPath!))
+                await NavigateAndFillAsync(parent ?? "");
             else
                 await RefreshCurrentFolderViewAsync();
         }
+
+
 
         private static bool ConfirmDelete(string title, IEnumerable<string> paths)
         {
@@ -477,6 +489,27 @@ namespace Explore
                 }
             });
         }
+
+        private async Task DeleteRecordsUnderAsync(string dir, CancellationToken ct)
+        {
+            // LIKE プレフィックスを安全にエスケープ
+            static string EscapeLike(string s) => s
+                .Replace("\\", "\\\\")
+                .Replace("%", "\\%")
+                .Replace("_", "\\_");
+
+            var prefix = EscapeLike(
+                Path.GetFullPath(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                + Path.DirectorySeparatorChar);
+
+            await using var conn = OpenConn();
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM files WHERE path LIKE $p || '%' ESCAPE '\\'";
+            cmd.Parameters.AddWithValue("$p", prefix);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
 
         private static string? GetPathFromContext(object? sender)
         {
