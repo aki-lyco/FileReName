@@ -7,6 +7,9 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
 		<UseWindowsForms>true</UseWindowsForms>
+
+		<!-- アプリのアイコン（Assets に配置した .ico を指定） -->
+		<ApplicationIcon>Assets\penguin_appicon_win.ico</ApplicationIcon>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -16,6 +19,7 @@
 	<ItemGroup>
 		<Folder Include="BuildSystem\" />
 		<Folder Include="Models\" />
+		<Folder Include="Assets\" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -26,9 +30,21 @@
 		<PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.8" />
 	</ItemGroup>
 
-	<!-- ★ 追加：外部アセットのマニフェストを埋め込み -->
+	<!-- 外部アセットのマニフェストを埋め込み -->
 	<ItemGroup>
 		<EmbeddedResource Include="AssetsManifest.json" />
+	</ItemGroup>
+
+	<!-- アイコンファイルをプロジェクトに表示（ビルドへのコピーは不要） -->
+	<ItemGroup>
+		<None Include="Assets\penguin_appicon_win.ico" />
+		<!-- 必要なら PNG も追加してください
+    <None Include="Assets\penguin_appicon_1024.png" />
+    <None Include="Assets\penguin_appicon_512.png" />
+    <None Include="Assets\penguin_appicon_256.png" />
+    <None Include="Assets\penguin_appicon_128.png" />
+    <None Include="Assets\penguin_appicon_64.png" />
+    -->
 	</ItemGroup>
 
 </Project>

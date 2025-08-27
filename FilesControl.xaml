@@ -17,32 +17,26 @@
 		<!-- パンくず -->
 		<local:PathToBreadcrumbConverter x:Key="PathToBreadcrumb" />
 
-		<!-- 行スタイル：選択時も文字は黒、背景は薄い青＋黒枠 -->
+		<!-- ========= DataGrid（右側）選択スタイル：薄青＋黒枠、文字は黒 ========= -->
 		<Style TargetType="{x:Type DataGridRow}">
 			<Setter Property="Padding" Value="10,2"/>
 			<Setter Property="BorderBrush" Value="#EEE"/>
 			<Setter Property="BorderThickness" Value="0,0,0,1"/>
 			<Setter Property="Background" Value="Transparent"/>
-			<!-- 常時：システム既定のテキスト色（=黒系）。ダークテーマでも良い感じに追従 -->
 			<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
 			<Style.Triggers>
 				<Trigger Property="IsSelected" Value="True">
-					<!-- 薄い青（好みで調整可） -->
 					<Setter Property="Background" Value="#E6F1FF"/>
-					<!-- 細い黒枠 -->
 					<Setter Property="BorderBrush" Value="#000000"/>
 					<Setter Property="BorderThickness" Value="1"/>
-					<!-- 文字は黒のまま -->
 					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
 				</Trigger>
-				<!-- フォーカス外選択でも文字は黒のまま -->
 				<Trigger Property="Selector.IsSelectionActive" Value="False">
 					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
 				</Trigger>
 			</Style.Triggers>
 		</Style>
 
-		<!-- セルスタイル：既定の青ハイライトを打ち消し、行の背景を見せつつ文字は黒固定 -->
 		<Style TargetType="{x:Type DataGridCell}">
 			<Setter Property="Background" Value="Transparent"/>
 			<Setter Property="BorderThickness" Value="0"/>
@@ -57,37 +51,76 @@
 				</Trigger>
 			</Style.Triggers>
 		</Style>
+		<!-- ========= /DataGrid 選択スタイル ========= -->
 
-
-		<!-- ツリーの見た目 -->
+		<!-- ツリーの見た目（コンテナ側の基本設定） -->
 		<Style TargetType="{x:Type TreeViewItem}" x:Key="FolderTreeItemStyle">
 			<Setter Property="Padding" Value="6,2"/>
 			<Setter Property="IsExpanded" Value="False"/>
+			<Setter Property="FocusVisualStyle" Value="{x:Null}"/>
 		</Style>
 
+		<!-- ========= TreeView ヘッダー（左側）：選択時の薄青＋黒枠、文字は黒 ========= -->
 		<!-- クイックアクセス：グループ -->
 		<HierarchicalDataTemplate DataType="{x:Type local:QuickAccessGroup}" ItemsSource="{Binding Items}">
-			<StackPanel Orientation="Horizontal">
-				<TextBlock Text="📌" Margin="0,0,6,0"/>
-				<TextBlock Text="{Binding Name}" />
-			</StackPanel>
+			<Border x:Name="SelBd" Background="Transparent" BorderBrush="Transparent"
+                    BorderThickness="1" CornerRadius="2" Padding="2">
+				<StackPanel Orientation="Horizontal">
+					<TextBlock Text="📌" Margin="0,0,6,0"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+					<TextBlock Text="{Binding Name}"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</StackPanel>
+			</Border>
+			<HierarchicalDataTemplate.Triggers>
+				<DataTrigger Value="True"
+                             Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}">
+					<Setter TargetName="SelBd" Property="Background" Value="#E6F1FF"/>
+					<Setter TargetName="SelBd" Property="BorderBrush"   Value="#000000"/>
+				</DataTrigger>
+			</HierarchicalDataTemplate.Triggers>
 		</HierarchicalDataTemplate>
 
 		<!-- クイックアクセス：項目 -->
 		<DataTemplate DataType="{x:Type local:QuickAccessItem}">
-			<StackPanel Orientation="Horizontal">
-				<TextBlock Text="⭐" Margin="0,0,6,0"/>
-				<TextBlock Text="{Binding Name}" />
-			</StackPanel>
+			<Border x:Name="SelBd" Background="Transparent" BorderBrush="Transparent"
+                    BorderThickness="1" CornerRadius="2" Padding="2">
+				<StackPanel Orientation="Horizontal">
+					<TextBlock Text="⭐" Margin="0,0,6,0"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+					<TextBlock Text="{Binding Name}"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</StackPanel>
+			</Border>
+			<DataTemplate.Triggers>
+				<DataTrigger Value="True"
+                             Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}">
+					<Setter TargetName="SelBd" Property="Background" Value="#E6F1FF"/>
+					<Setter TargetName="SelBd" Property="BorderBrush"   Value="#000000"/>
+				</DataTrigger>
+			</DataTemplate.Triggers>
 		</DataTemplate>
 
 		<!-- 通常フォルダ（前の見た目：📁＋テキスト） -->
 		<HierarchicalDataTemplate DataType="{x:Type fs:FolderNode}" ItemsSource="{Binding Children}">
-			<StackPanel Orientation="Horizontal">
-				<TextBlock Text="📁" Margin="0,0,6,0"/>
-				<TextBlock Text="{Binding Name}" />
-			</StackPanel>
+			<Border x:Name="SelBd" Background="Transparent" BorderBrush="Transparent"
+                    BorderThickness="1" CornerRadius="2" Padding="2">
+				<StackPanel Orientation="Horizontal">
+					<TextBlock Text="📁" Margin="0,0,6,0"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+					<TextBlock Text="{Binding Name}"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</StackPanel>
+			</Border>
+			<HierarchicalDataTemplate.Triggers>
+				<DataTrigger Value="True"
+                             Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}">
+					<Setter TargetName="SelBd" Property="Background" Value="#E6F1FF"/>
+					<Setter TargetName="SelBd" Property="BorderBrush"   Value="#000000"/>
+				</DataTrigger>
+			</HierarchicalDataTemplate.Triggers>
 		</HierarchicalDataTemplate>
+		<!-- ========= /TreeView 選択スタイル ========= -->
 
 		<!-- 鮮度表示用 -->
 		<conv:FreshStateToBrushConverter x:Key="FreshBrush"/>
@@ -193,25 +226,16 @@
 		<!-- ツールバー -->
 		<Border Grid.Row="0" Background="#F6F7F9" Padding="8,8" BorderBrush="#E6E6E6" BorderThickness="0,0,0,1">
 			<StackPanel Orientation="Horizontal">
-				<Button x:Name="BtnNewCreate" Content="新規作成" Margin="0,0,8,0"
-                        Style="{StaticResource ToolbarButton}"/>
+				<Button x:Name="BtnNewCreate" Content="新規作成" Margin="0,0,8,0" Style="{StaticResource ToolbarButton}"/>
 				<Separator Width="8"/>
-				<Button x:Name="BtnIndex" Content="このフォルダを同期" Margin="0,0,8,0"
-                        Style="{StaticResource ToolbarButton}"/>
-				<Button x:Name="BtnIndexDiff" Content="差分のみIndex" Margin="0,0,8,0"
-                        Style="{StaticResource ToolbarButton}"/>
+				<Button x:Name="BtnIndex" Content="このフォルダを同期" Margin="0,0,8,0" Style="{StaticResource ToolbarButton}"/>
+				<Button x:Name="BtnIndexDiff" Content="差分のみIndex" Margin="0,0,8,0" Style="{StaticResource ToolbarButton}"/>
 
 				<!-- ゴミ箱へ移動 -->
-				<Button x:Name="BtnRecycle"
-                        Style="{StaticResource ToolbarIconButton}"
-                        Margin="0,0,8,0"
-                        ToolTip="ゴミ箱へ移動"
-                        AutomationProperties.Name="ゴミ箱へ移動">
-					<TextBlock FontFamily="Segoe MDL2 Assets"
-                               Text="&#xE74D;"
-                               FontSize="16"
-                               HorizontalAlignment="Center"
-                               VerticalAlignment="Center" />
+				<Button x:Name="BtnRecycle" Style="{StaticResource ToolbarIconButton}"
+                        Margin="0,0,8,0" ToolTip="ゴミ箱へ移動" AutomationProperties.Name="ゴミ箱へ移動">
+					<TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74D;" FontSize="16"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
 				</Button>
 
 				<TextBlock Text="{Binding IndexStatusText}" Margin="16,0,0,0" VerticalAlignment="Center" Foreground="#666"/>
@@ -250,10 +274,11 @@
 					</ItemsControl>
 				</ScrollViewer>
 
-				<!-- ピン -->
+				<!-- ★ ピン（Click ハンドラ復活） -->
 				<Button x:Name="BtnPin" DockPanel.Dock="Right" Margin="8,0,0,0" Padding="8,2"
                         ToolTip="クイックアクセスにピン留め / 解除"
-                        Click="OnPinButtonClick" Background="Transparent" BorderBrush="#DDD">
+                        Background="Transparent" BorderBrush="#DDD"
+                        Click="OnPinButtonClick">
 					<Button.Style>
 						<Style TargetType="Button">
 							<Setter Property="Content" Value="☆"/>
@@ -279,14 +304,18 @@
 			<!-- フォルダツリー -->
 			<Border Grid.Column="0" BorderBrush="#E6E6E6" BorderThickness="0,0,1,0">
 				<TreeView x:Name="FolderTree"
-                          ItemsSource="{Binding VM.Roots}"
+                          ItemsSource="{Binding TreeItems}"
                           ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
                           VirtualizingStackPanel.IsVirtualizing="True"
                           VirtualizingPanel.ScrollUnit="Item"
-                          ScrollViewer.CanContentScroll="True"
-                          SelectedItemChanged="OnFolderSelected"
-                          PreviewMouseRightButtonDown="FolderTree_PreviewMouseRightButtonDown"
-                          ContextMenuOpening="FolderTree_ContextMenuOpening">
+                          ScrollViewer.CanContentScroll="True">
+
+					<!-- 既定の濃い青ハイライトを無効化（TreeView 内スコープ） -->
+					<TreeView.Resources>
+						<SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="Transparent"/>
+						<SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="Transparent"/>
+						<SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#000000"/>
+					</TreeView.Resources>
 				</TreeView>
 			</Border>
 
@@ -298,7 +327,7 @@
 			<!-- ファイル一覧 -->
 			<Grid Grid.Column="2">
 				<DataGrid x:Name="FilesGrid"
-                          ItemsSource="{Binding VM.Files}"
+                          ItemsSource="{Binding Rows}"
                           AutoGenerateColumns="False"
                           HeadersVisibility="Column"
                           GridLinesVisibility="None"
@@ -308,9 +337,7 @@
                           EnableRowVirtualization="True"
                           EnableColumnVirtualization="True"
                           ScrollViewer.CanContentScroll="True"
-                          RowHeaderWidth="0"
-                          ContextMenuOpening="FilesGrid_ContextMenuOpening"
-                          PreviewMouseRightButtonDown="FilesGrid_PreviewMouseRightButtonDown">
+                          RowHeaderWidth="0">
 					<DataGrid.Columns>
 						<!-- 左端チェック列 -->
 						<DataGridTemplateColumn Width="40" IsReadOnly="False">
