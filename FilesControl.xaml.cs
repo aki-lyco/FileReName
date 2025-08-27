@@ -31,6 +31,8 @@ using WpfDragDropEffects = System.Windows.DragDropEffects;
 using WpfBinding = System.Windows.Data.Binding;
 using WpfButton = System.Windows.Controls.Button;
 using WpfCheckBox = System.Windows.Controls.CheckBox;
+using WpfTextBox = System.Windows.Controls.TextBox;
+using WpfDataBinding = System.Windows.Data.Binding;
 
 namespace Explore
 {
@@ -202,6 +204,7 @@ namespace Explore
             FilesGrid.PreviewMouseMove += OnFilesGrid_PreviewMouseMove_ForDrag;
             FilesGrid.PreviewMouseRightButtonDown += FilesGrid_PreviewMouseRightButtonDown;
             FilesGrid.ContextMenuOpening += FilesGrid_ContextMenuOpening;
+            FilesGrid.CellEditEnding += OnFilesGridCellEditEnding; // ← 右クリックからの「名前変更」用
 
             this.AllowDrop = true;
             this.DragOver += OnRootDragOver;
@@ -297,17 +300,23 @@ namespace Explore
         // 一覧VM
         public sealed class FileRow : INotifyPropertyChanged
         {
-            public string FullPath { get; init; } = "";
-            public string Name { get; init; } = "";
-            public string Extension { get; init; } = "";
+            private string _fullPath = "";
+            public string FullPath { get => _fullPath; set { if (_fullPath != value) { _fullPath = value; PropertyChanged?.Invoke(this, new(nameof(FullPath))); } } }
+
+            private string _name = "";
+            public string Name { get => _name; set { if (_name != value) { _name = value; PropertyChanged?.Invoke(this, new(nameof(Name))); } } }
+
+            private string _ext = "";
+            public string Extension { get => _ext; set { if (_ext != value) { _ext = value; PropertyChanged?.Invoke(this, new(nameof(Extension))); } } }
+
             public long Size { get; init; }
             public DateTime LastWriteTime { get; init; }
 
             private FreshState _fresh = FreshState.Unindexed;
-            public FreshState FreshState { get => _fresh; set { if (_fresh != value) { _fresh = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FreshState))); } } }
+            public FreshState FreshState { get => _fresh; set { if (_fresh != value) { _fresh = value; PropertyChanged?.Invoke(this, new(nameof(FreshState))); } } }
 
             private bool _isChecked;
-            public bool IsChecked { get => _isChecked; set { if (_isChecked != value) { _isChecked = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsChecked))); } } }
+            public bool IsChecked { get => _isChecked; set { if (_isChecked != value) { _isChecked = value; PropertyChanged?.Invoke(this, new(nameof(IsChecked))); } } }
 
             public event PropertyChangedEventHandler? PropertyChanged;
         }
@@ -516,6 +525,8 @@ namespace Explore
             cm.Items.Add(MI("開く", "OpenFile"));
             cm.Items.Add(MI("場所を開く", "OpenLocation"));
             cm.Items.Add(new Separator());
+            cm.Items.Add(MI("名前を変更", "Rename"));           // ← 追加
+            cm.Items.Add(new Separator());
             cm.Items.Add(MI("差分のみ Index（このファイル）", "ReindexFile"));
             cm.Items.Add(MI("DBレコード削除", "DeleteDbRecord"));
             cm.Items.Add(new Separator());
@@ -534,9 +545,121 @@ namespace Explore
             {
                 case "OpenFile": OpenFile(path); break;
                 case "OpenLocation": OpenLocation(path); break;
+                case "Rename":
+                    {
+                        var fr = Rows.FirstOrDefault(r => string.Equals(r.FullPath, path, StringComparison.OrdinalIgnoreCase));
+                        if (fr != null) BeginInlineRename(fr);
+                        break;
+                    }
                 case "ReindexFile": _ = ReindexOneAsync(path); break;
                 case "DeleteDbRecord": _ = DeleteDbRecordAsync(path); break;
                 case "DeleteFile": _ = DeleteFilesAsync(new[] { path }); break;
+            }
+        }
+
+        // --- 右クリック「名前を変更」 → DataGrid の該当セルだけ編集可能にして BeginEdit ---
+        private (bool gridRO, DataGridColumn? col, bool colRO, string? oldName, string? oldPath)? _renameRestore;
+
+        private DataGridColumn? FindNameColumn()
+        {
+            foreach (var c in FilesGrid.Columns)
+            {
+                if (c is DataGridBoundColumn bc && bc.Binding is WpfDataBinding b && string.Equals(b.Path?.Path, "Name", StringComparison.Ordinal))
+                    return c;
+            }
+            return null;
+        }
+
+        private void BeginInlineRename(FileRow fr)
+        {
+            var nameCol = FindNameColumn();
+            if (nameCol == null)
+            {
+                WpfMessageBox.Show("名前列が見つかりません。", "名前の変更", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            _renameRestore = (FilesGrid.IsReadOnly, nameCol, nameCol.IsReadOnly, fr.Name, fr.FullPath);
+
+            FilesGrid.IsReadOnly = false;
+            nameCol.IsReadOnly = false;
+
+            FilesGrid.SelectedItem = fr;
+            FilesGrid.CurrentCell = new DataGridCellInfo(fr, nameCol);
+
+            // すこし遅延してから BeginEdit しないとフォーカスが合わない場合がある
+            Dispatcher.BeginInvoke(new Action(() => FilesGrid.BeginEdit()));
+        }
+
+        private void OnFilesGridCellEditEnding(object? sender, DataGridCellEditEndingEventArgs e)
+        {
+            // 編集終了時に、元の読み取り専用設定へ戻す
+            if (_renameRestore is var st && st != null)
+            {
+                FilesGrid.IsReadOnly = st.Value.gridRO;
+                if (st.Value.col != null) st.Value.col.IsReadOnly = st.Value.colRO;
+            }
+
+            // 「名前」列以外、またはキャンセル時は何もしない
+            if (e.Column is not DataGridBoundColumn bc || !(bc.Binding is WpfDataBinding b) || !string.Equals(b.Path?.Path, "Name", StringComparison.Ordinal) || e.EditAction != DataGridEditAction.Commit)
+            {
+                _renameRestore = null;
+                return;
+            }
+
+            if (e.Row?.Item is not FileRow fr || _renameRestore is null) { _renameRestore = null; return; }
+
+            var oldPath = _renameRestore.Value.oldPath ?? fr.FullPath;
+            var oldName = _renameRestore.Value.oldName ?? fr.Name;
+            _renameRestore = null;
+
+            // TextBox から新しい値を拾う（TwoWay でも念のため）
+            if (e.EditingElement is WpfTextBox tb) fr.Name = tb.Text?.Trim() ?? fr.Name;
+
+            // 変更が無ければ終了
+            if (string.Equals(fr.Name, oldName, StringComparison.Ordinal)) return;
+
+            // ファイルシステムのリネーム
+            try
+            {
+                var dir = System.IO.Path.GetDirectoryName(oldPath) ?? "";
+                if (string.IsNullOrWhiteSpace(dir)) throw new InvalidOperationException("保存先パスが不明です。");
+
+                var newPath = System.IO.Path.Combine(dir, fr.Name);
+
+                if (File.Exists(newPath))
+                {
+                    WpfMessageBox.Show("同名のファイルが既に存在します。", "名前の変更", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    fr.Name = oldName; // 戻す
+                    return;
+                }
+
+                File.Move(oldPath, newPath);
+
+                // 表示を更新
+                fr.FullPath = newPath;
+                fr.Extension = System.IO.Path.GetExtension(newPath);
+
+                // DB更新（失敗しても致命ではないので fire-and-forget）
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await DeleteByPathAsync(oldPath, CancellationToken.None);
+                        await UpsertFileFromFsAsync(newPath, CancellationToken.None);
+                        var dir2 = System.IO.Path.GetDirectoryName(newPath) ?? _vm.CurrentPath ?? "";
+                        _fresh.InvalidateFreshnessCache(dir2);
+                        await RefreshRowsFreshnessAsync(dir2);
+                        _ = RecalcFreshnessPercentAsync(dir2);
+                    }
+                    catch { }
+                });
+            }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(ex.Message, "名前の変更エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+                // 失敗時は表示名を元に戻す
+                fr.Name = oldName;
             }
         }
 
@@ -639,7 +762,7 @@ namespace Explore
             }
         }
 
-        // ======= 新規作成メニュー =======
+        // ======= 新規作成メニュー =======（以下 既存ロジック：変更なし）
         private void OnNewButtonClick(object? sender, RoutedEventArgs e)
         {
             if (sender is not FrameworkElement fe) return;
@@ -656,7 +779,7 @@ namespace Explore
             cm.Items.Add(new Separator());
             cm.Items.Add(MI("空の画像 (.png)", OnNewPngClick));
             cm.Items.Add(MI("Bitmap 画像 (.bmp)", OnNewBmpClick));
-            cm.Items.Add(new Separator());   // ← 余計な ')' を削除
+            cm.Items.Add(new Separator());
             cm.Items.Add(MI("圧縮 (zip) フォルダー", OnNewZipClick));
             cm.Items.Add(new Separator());
             cm.Items.Add(MI("既存ファイルをコピーして追加...", OnImportFilesClick));
