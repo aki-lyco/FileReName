@@ -11,6 +11,11 @@
 		<Setter Property="Maximum" Value="100"/>
 	</Style>
 
+	<!-- 追加：ホバー用ブラシ（ライト） -->
+	<SolidColorBrush x:Key="Row.HoverBg"     Color="#F3F8FF"/>
+	<SolidColorBrush x:Key="Row.HoverBorder" Color="#CDE3FF"/>
+	<SolidColorBrush x:Key="Tree.HoverBg"    Color="#F5F9FF"/>
+
 	<!-- Slider 既定 -->
 	<Style TargetType="Slider">
 		<Setter Property="Minimum" Value="0"/>

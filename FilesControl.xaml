@@ -31,6 +31,18 @@
 					<Setter Property="BorderThickness" Value="1"/>
 					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
 				</Trigger>
+
+				<!-- ★追加：未選択時のホバー色（テーマのブラシを使用） -->
+				<MultiTrigger>
+					<MultiTrigger.Conditions>
+						<Condition Property="IsMouseOver" Value="True"/>
+						<Condition Property="IsSelected"   Value="False"/>
+					</MultiTrigger.Conditions>
+					<Setter Property="Background"     Value="{DynamicResource Row.HoverBg}"/>
+					<Setter Property="BorderBrush"    Value="{DynamicResource Row.HoverBorder}"/>
+					<Setter Property="BorderThickness" Value="1"/>
+				</MultiTrigger>
+
 				<Trigger Property="Selector.IsSelectionActive" Value="False">
 					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
 				</Trigger>
@@ -78,6 +90,16 @@
 					<Setter TargetName="SelBd" Property="Background" Value="#E6F1FF"/>
 					<Setter TargetName="SelBd" Property="BorderBrush"   Value="#000000"/>
 				</DataTrigger>
+
+				<!-- ★追加：未選択ホバー -->
+				<MultiDataTrigger>
+					<MultiDataTrigger.Conditions>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsMouseOver}" Value="True"/>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}"   Value="False"/>
+					</MultiDataTrigger.Conditions>
+					<Setter TargetName="SelBd" Property="Background"  Value="{DynamicResource Tree.HoverBg}"/>
+					<Setter TargetName="SelBd" Property="BorderBrush" Value="#D7E6FF"/>
+				</MultiDataTrigger>
 			</HierarchicalDataTemplate.Triggers>
 		</HierarchicalDataTemplate>
 
@@ -98,6 +120,16 @@
 					<Setter TargetName="SelBd" Property="Background" Value="#E6F1FF"/>
 					<Setter TargetName="SelBd" Property="BorderBrush"   Value="#000000"/>
 				</DataTrigger>
+
+				<!-- ★追加：未選択ホバー -->
+				<MultiDataTrigger>
+					<MultiDataTrigger.Conditions>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsMouseOver}" Value="True"/>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}"   Value="False"/>
+					</MultiDataTrigger.Conditions>
+					<Setter TargetName="SelBd" Property="Background"  Value="{DynamicResource Tree.HoverBg}"/>
+					<Setter TargetName="SelBd" Property="BorderBrush" Value="#D7E6FF"/>
+				</MultiDataTrigger>
 			</DataTemplate.Triggers>
 		</DataTemplate>
 
@@ -118,6 +150,16 @@
 					<Setter TargetName="SelBd" Property="Background" Value="#E6F1FF"/>
 					<Setter TargetName="SelBd" Property="BorderBrush"   Value="#000000"/>
 				</DataTrigger>
+
+				<!-- ★追加：未選択ホバー -->
+				<MultiDataTrigger>
+					<MultiDataTrigger.Conditions>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsMouseOver}" Value="True"/>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}"   Value="False"/>
+					</MultiDataTrigger.Conditions>
+					<Setter TargetName="SelBd" Property="Background"  Value="{DynamicResource Tree.HoverBg}"/>
+					<Setter TargetName="SelBd" Property="BorderBrush" Value="#D7E6FF"/>
+				</MultiDataTrigger>
 			</HierarchicalDataTemplate.Triggers>
 		</HierarchicalDataTemplate>
 		<!-- ========= /TreeView 選択スタイル ========= -->
@@ -130,6 +172,7 @@
 		<!-- ===== Toolbar modern styles ===== -->
 		<SolidColorBrush x:Key="Tb.Fg" Color="#222" />
 		<SolidColorBrush x:Key="Tb.Bg" Color="#F6F7F9" />
+		<!-- 既存 Hover/Pressed/Border など -->
 		<SolidColorBrush x:Key="Tb.BgHover" Color="#EEF1F6" />
 		<SolidColorBrush x:Key="Tb.BgPressed" Color="#E5E9F1" />
 		<SolidColorBrush x:Key="Tb.Border" Color="#D0D5DD" />
