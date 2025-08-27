@@ -20,6 +20,7 @@
 		<Folder Include="BuildSystem\" />
 		<Folder Include="Models\" />
 		<Folder Include="Assets\" />
+		<Folder Include="Assets\Icons\" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -35,16 +36,22 @@
 		<EmbeddedResource Include="AssetsManifest.json" />
 	</ItemGroup>
 
-	<!-- アイコンファイルをプロジェクトに表示（ビルドへのコピーは不要） -->
+	<!-- アプリアイコン（ビルドには含まれるが実行時コピー不要） -->
 	<ItemGroup>
 		<None Include="Assets\penguin_appicon_win.ico" />
-		<!-- 必要なら PNG も追加してください
-    <None Include="Assets\penguin_appicon_1024.png" />
-    <None Include="Assets\penguin_appicon_512.png" />
-    <None Include="Assets\penguin_appicon_256.png" />
-    <None Include="Assets\penguin_appicon_128.png" />
-    <None Include="Assets\penguin_appicon_64.png" />
-    -->
+	</ItemGroup>
+
+	<!-- ▼ 追加：大きいPNGを WPF リソース（pack://application:,,,/）として含める -->
+	<!-- まず None の既定アイテムから除外して重複を防ぐ -->
+	<ItemGroup>
+		<None Remove="Assets\Icons\big_db_index_add_light..png.png" />
+		<None Remove="Assets\Icons\big_db_index_add_dark.png.png" />
+	</ItemGroup>
+
+	<!-- Resource として含める（Themes から DynamicResource → BitmapImage で参照） -->
+	<ItemGroup>
+		<Resource Include="Assets\Icons\big_db_index_add_light.png.png" />
+		<Resource Include="Assets\Icons\big_db_index_add_dark.png.png" />
 	</ItemGroup>
 
 </Project>

@@ -101,7 +101,7 @@
 			</DataTemplate.Triggers>
 		</DataTemplate>
 
-		<!-- 通常フォルダ（前の見た目：📁＋テキスト） -->
+		<!-- 通常フォルダ -->
 		<HierarchicalDataTemplate DataType="{x:Type fs:FolderNode}" ItemsSource="{Binding Children}">
 			<Border x:Name="SelBd" Background="Transparent" BorderBrush="Transparent"
                     BorderThickness="1" CornerRadius="2" Padding="2">
@@ -213,6 +213,27 @@
 				</Setter.Value>
 			</Setter>
 		</Style>
+
+		<!-- ツールバー用の小さな黒ツールチップ -->
+		<Style x:Key="ToolbarTooltip" TargetType="ToolTip">
+			<Setter Property="Background" Value="#2B2B2B"/>
+			<Setter Property="Foreground" Value="White"/>
+			<Setter Property="Padding" Value="8,4"/>
+			<Setter Property="FontSize" Value="12"/>
+			<Setter Property="HasDropShadow" Value="True"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="ToolTip">
+						<Border Background="{TemplateBinding Background}"
+                                CornerRadius="6"
+                                SnapsToDevicePixels="True">
+							<ContentPresenter Margin="{TemplateBinding Padding}"
+                                              RecognizesAccessKey="True"/>
+						</Border>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
 		<!-- ===== /Toolbar modern styles ===== -->
 	</UserControl.Resources>
 
@@ -228,7 +249,25 @@
 			<StackPanel Orientation="Horizontal">
 				<Button x:Name="BtnNewCreate" Content="新規作成" Margin="0,0,8,0" Style="{StaticResource ToolbarButton}"/>
 				<Separator Width="8"/>
-				<Button x:Name="BtnIndex" Content="このフォルダを同期" Margin="0,0,8,0" Style="{StaticResource ToolbarButton}"/>
+
+				<!-- ▼ このフォルダを同期：アイコンのみ（32px）、ボタンは 44px。ホバーで「DBに追加」 -->
+				<Button x:Name="BtnIndex"
+                        Style="{StaticResource ToolbarIconButton}"
+                        Width="44" Height="44"
+                        Margin="0,0,8,0"
+                        ToolTipService.InitialShowDelay="150"
+                        ToolTipService.ShowDuration="4000"
+                        ToolTipService.Placement="Top"
+                        AutomationProperties.Name="DBに追加">
+					<Button.ToolTip>
+						<ToolTip Style="{StaticResource ToolbarTooltip}" Content="DBに追加"/>
+					</Button.ToolTip>
+					<Image Width="32" Height="32"
+                           Source="{DynamicResource Icon.DbIndex.Add}"
+                           SnapsToDevicePixels="True"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+				</Button>
+
 				<Button x:Name="BtnIndexDiff" Content="差分のみIndex" Margin="0,0,8,0" Style="{StaticResource ToolbarButton}"/>
 
 				<!-- ゴミ箱へ移動 -->
@@ -274,7 +313,7 @@
 					</ItemsControl>
 				</ScrollViewer>
 
-				<!-- ★ ピン（Click ハンドラ復活） -->
+				<!-- ★ ピン -->
 				<Button x:Name="BtnPin" DockPanel.Dock="Right" Margin="8,0,0,0" Padding="8,2"
                         ToolTip="クイックアクセスにピン留め / 解除"
                         Background="Transparent" BorderBrush="#DDD"

@@ -1,8 +1,8 @@
-﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-	<!-- 既存テーマ色 -->
-	<Color x:Key="ThemeColor">#FF197FFF</Color>
+	<!-- 既存テーマ色（ダーク） -->
+	<Color x:Key="ThemeColor">#FF4CC2FF</Color>
 	<SolidColorBrush x:Key="ThemeBrush" Color="{StaticResource ThemeColor}"/>
 
 	<!-- ProgressBar 既定 -->
@@ -17,11 +17,9 @@
 		<Setter Property="Maximum" Value="100"/>
 	</Style>
 
-	<!-- ▼ 高解像度アイコン（Light） -->
-	<!--   pack リソースとして読み込む。DecodePixelWidth は余裕を持って 80 にし、
-         実表示 20px にダウンサンプル（FilesControl 側は HighQuality スケーリング） -->
+	<!-- ▼ 高解像度アイコン（Dark） -->
 	<BitmapImage x:Key="Icon.DbIndex.Add"
-                 UriSource="pack://application:,,,/Assets/Icons/big_db_index_add_light.png.png"
+                 UriSource="pack://application:,,,/Assets/Icons/big_db_index_add_dark.png.png"
                  DecodePixelWidth="128"
                  CacheOption="OnLoad"/>
 </ResourceDictionary>
