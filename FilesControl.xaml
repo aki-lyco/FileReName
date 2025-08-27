@@ -6,19 +6,58 @@
              xmlns:local="clr-namespace:Explore"
              xmlns:fs="clr-namespace:Explore.FileSystem"
              xmlns:conv="clr-namespace:FileReName.Converters"
+             xmlns:icon="clr-namespace:Explore.Converters"
              mc:Ignorable="d"
              d:DesignHeight="600" d:DesignWidth="1000">
 
 	<UserControl.Resources>
+		<!-- 先に宣言：拡張子/パス→シェルアイコン（ファイル一覧で使用） -->
+		<icon:PathToIconConverter x:Key="PathToIcon"/>
+
 		<!-- パンくず -->
 		<local:PathToBreadcrumbConverter x:Key="PathToBreadcrumb" />
 
-		<!-- DataGrid の行スタイル -->
+		<!-- 行スタイル：選択時も文字は黒、背景は薄い青＋黒枠 -->
 		<Style TargetType="{x:Type DataGridRow}">
 			<Setter Property="Padding" Value="10,2"/>
 			<Setter Property="BorderBrush" Value="#EEE"/>
 			<Setter Property="BorderThickness" Value="0,0,0,1"/>
+			<Setter Property="Background" Value="Transparent"/>
+			<!-- 常時：システム既定のテキスト色（=黒系）。ダークテーマでも良い感じに追従 -->
+			<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+			<Style.Triggers>
+				<Trigger Property="IsSelected" Value="True">
+					<!-- 薄い青（好みで調整可） -->
+					<Setter Property="Background" Value="#E6F1FF"/>
+					<!-- 細い黒枠 -->
+					<Setter Property="BorderBrush" Value="#000000"/>
+					<Setter Property="BorderThickness" Value="1"/>
+					<!-- 文字は黒のまま -->
+					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</Trigger>
+				<!-- フォーカス外選択でも文字は黒のまま -->
+				<Trigger Property="Selector.IsSelectionActive" Value="False">
+					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</Trigger>
+			</Style.Triggers>
 		</Style>
+
+		<!-- セルスタイル：既定の青ハイライトを打ち消し、行の背景を見せつつ文字は黒固定 -->
+		<Style TargetType="{x:Type DataGridCell}">
+			<Setter Property="Background" Value="Transparent"/>
+			<Setter Property="BorderThickness" Value="0"/>
+			<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+			<Style.Triggers>
+				<Trigger Property="IsSelected" Value="True">
+					<Setter Property="Background" Value="Transparent"/>
+					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</Trigger>
+				<Trigger Property="Selector.IsSelectionActive" Value="False">
+					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</Trigger>
+			</Style.Triggers>
+		</Style>
+
 
 		<!-- ツリーの見た目 -->
 		<Style TargetType="{x:Type TreeViewItem}" x:Key="FolderTreeItemStyle">
@@ -42,7 +81,7 @@
 			</StackPanel>
 		</DataTemplate>
 
-		<!-- 通常フォルダ -->
+		<!-- 通常フォルダ（前の見た目：📁＋テキスト） -->
 		<HierarchicalDataTemplate DataType="{x:Type fs:FolderNode}" ItemsSource="{Binding Children}">
 			<StackPanel Orientation="Horizontal">
 				<TextBlock Text="📁" Margin="0,0,6,0"/>
@@ -56,7 +95,6 @@
 		<conv:FreshStateToTipConverter   x:Key="FreshTip"/>
 
 		<!-- ===== Toolbar modern styles ===== -->
-		<!-- Colors -->
 		<SolidColorBrush x:Key="Tb.Fg" Color="#222" />
 		<SolidColorBrush x:Key="Tb.Bg" Color="#F6F7F9" />
 		<SolidColorBrush x:Key="Tb.BgHover" Color="#EEF1F6" />
@@ -67,7 +105,6 @@
 		<SolidColorBrush x:Key="Tb.PrimaryBorder" Color="#3B82F6" />
 		<SolidColorBrush x:Key="Tb.PrimaryFg" Color="#0B5ED7" />
 
-		<!-- 通常ボタン -->
 		<Style x:Key="ToolbarButton" TargetType="Button">
 			<Setter Property="Foreground" Value="{StaticResource Tb.Fg}"/>
 			<Setter Property="Background" Value="{StaticResource Tb.Bg}"/>
@@ -108,14 +145,12 @@
 			</Setter>
 		</Style>
 
-		<!-- アイコンだけの小型ボタン -->
 		<Style x:Key="ToolbarIconButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
 			<Setter Property="MinWidth" Value="40"/>
 			<Setter Property="Width" Value="40"/>
 			<Setter Property="Padding" Value="0"/>
 		</Style>
 
-		<!-- トグルボタン（必要になったら使用） -->
 		<Style x:Key="ToolbarToggle" TargetType="ToggleButton" BasedOn="{StaticResource ToolbarButton}">
 			<Setter Property="MinWidth" Value="0"/>
 			<Setter Property="Template">
@@ -166,13 +201,12 @@
 				<Button x:Name="BtnIndexDiff" Content="差分のみIndex" Margin="0,0,8,0"
                         Style="{StaticResource ToolbarButton}"/>
 
-				<!-- ★ ゴミ箱へ移動：アイコン -->
+				<!-- ゴミ箱へ移動 -->
 				<Button x:Name="BtnRecycle"
                         Style="{StaticResource ToolbarIconButton}"
                         Margin="0,0,8,0"
                         ToolTip="ゴミ箱へ移動"
                         AutomationProperties.Name="ゴミ箱へ移動">
-					<!-- Segoe MDL2 Assets の Delete(ごみ箱) アイコン -->
 					<TextBlock FontFamily="Segoe MDL2 Assets"
                                Text="&#xE74D;"
                                FontSize="16"
@@ -245,7 +279,7 @@
 			<!-- フォルダツリー -->
 			<Border Grid.Column="0" BorderBrush="#E6E6E6" BorderThickness="0,0,1,0">
 				<TreeView x:Name="FolderTree"
-                          ItemsSource="{Binding TreeItems}"
+                          ItemsSource="{Binding VM.Roots}"
                           ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
                           VirtualizingStackPanel.IsVirtualizing="True"
                           VirtualizingPanel.ScrollUnit="Item"
@@ -264,12 +298,13 @@
 			<!-- ファイル一覧 -->
 			<Grid Grid.Column="2">
 				<DataGrid x:Name="FilesGrid"
-                          ItemsSource="{Binding Rows}"
+                          ItemsSource="{Binding VM.Files}"
                           AutoGenerateColumns="False"
                           HeadersVisibility="Column"
                           GridLinesVisibility="None"
                           CanUserAddRows="False"
                           SelectionMode="Extended"
+                          SelectionUnit="FullRow"
                           EnableRowVirtualization="True"
                           EnableColumnVirtualization="True"
                           ScrollViewer.CanContentScroll="True"
@@ -289,6 +324,16 @@
 								<DataTemplate>
 									<CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"
                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+								</DataTemplate>
+							</DataGridTemplateColumn.CellTemplate>
+						</DataGridTemplateColumn>
+
+						<!-- 種類アイコン列（拡張子から取得） -->
+						<DataGridTemplateColumn Width="36" IsReadOnly="True">
+							<DataGridTemplateColumn.CellTemplate>
+								<DataTemplate>
+									<Image Width="16" Height="16" Margin="2"
+                                           Source="{Binding Extension, Converter={StaticResource PathToIcon}}"/>
 								</DataTemplate>
 							</DataGridTemplateColumn.CellTemplate>
 						</DataGridTemplateColumn>
