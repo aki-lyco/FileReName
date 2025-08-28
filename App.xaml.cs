@@ -14,6 +14,9 @@ namespace Explore
         private static Mutex? _singleInstance;
         private static int _shown; // 例外ダイアログの連発防止
 
+        // A用：二重起動防止
+        private static int _assetsPrepareRunning = 0;
+
         public App()
         {
             // UI スレッドの未処理例外
@@ -63,20 +66,10 @@ namespace Explore
                 return;
             }
 
-            // ---- 外部ツール整備：初回のみ await、以後はBGで ----
-            try
-            {
-                await PrepareExternalAssetsAsync().ConfigureAwait(true);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine("External assets prepare failed: " + ex);
-            }
-
-            // ---- テーマ ----
+            // ---- テーマ（軽いので先に適用）----
             TryLoadThemeDictionary();
 
-            // ---- MainWindow ----
+            // ---- MainWindow を先に表示（ここがAの肝）----
             try
             {
                 if (this.MainWindow == null)
@@ -93,11 +86,24 @@ namespace Explore
                 return;
             }
 
+            // ---- 外部ツール準備は UI をブロックしない（BG実行）----
+            _ = Dispatcher.InvokeAsync(async () =>
+            {
+                try
+                {
+                    await PrepareExternalAssetsAsync(); // 完了後に AppStatus.IsOcrReady を立てる
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine("External assets prepare failed: " + ex);
+                }
+            }, DispatcherPriority.Background);
+
             // ---- 設定に従って「初回セットアップ」を出すか判断 ----
             try
             {
-                var settings = AppSettings.Load(); // ★ 既存の settings.json を読む
-                if (settings.Dev.AlwaysShowFirstRun) // ★ true のときだけ表示
+                var settings = AppSettings.Load(); // settings.json を読む
+                if (settings.Dev.AlwaysShowFirstRun) // true のときだけ表示
                 {
                     await Dispatcher.InvokeAsync(() =>
                     {
@@ -157,29 +163,95 @@ namespace Explore
             base.OnExit(e);
         }
 
-        // ========== ここから：B案の実装 ==========
         /// <summary>
-        /// 外部ツールが未整備なら await で揃える。揃っていれば BG で最新化（起動をブロックしない）。
+        /// 外部ツールの準備（A対応版）。
+        /// 1) 設定キャッシュ（O(1)）→ OKなら即適用
+        /// 2) 簡易探索（env/ProgramFiles/assets）→ OKなら解決して保存
+        /// 3) 不足時はマニフェストから取得・展開 → 解決して保存
+        /// ※ このメソッドは BG から呼ばれる（起動をブロックしない）
         /// </summary>
         private async Task PrepareExternalAssetsAsync()
         {
-            var ready = AreExternalToolsAvailableQuickCheck();
+            // 二重起動防止
+            if (Interlocked.Exchange(ref _assetsPrepareRunning, 1) == 1)
+                return;
 
-            if (!ready)
+            try
             {
-                // ★ 初回など：待って確実に整える
-                await SetupExternalAssetsAsync().ConfigureAwait(true);
+                // ① 設定キャッシュで即判定
+                if (ExternalAssets.QuickCheckFromSettings())
+                {
+                    ApplyEnvFromSettings();   // 現プロセスに反映
+                    AppStatus.SetOcrReady();  // フラグON（UIで使える）
+                    // 背景でパス再解決（構成変化の軽チェック）
+                    _ = Task.Run(async () =>
+                    {
+                        try { await ExternalAssets.ResolveAndCacheToolPathsAsync(); } catch { }
+                    });
+                    return;
+                }
+
+                // ② 従来の軽量探索（env→既知→assets再帰）
+                var ready = AreExternalToolsAvailableQuickCheck();
+
+                if (!ready)
+                {
+                    // ★ 初回など：待って確実に整える（DL/展開＋env設定）
+                    await SetupExternalAssetsAsync().ConfigureAwait(true);
+
+                    // 展開結果から実体パスを確定して設定に保存（次回はO(1)）
+                    await ExternalAssets.ResolveAndCacheToolPathsAsync().ConfigureAwait(false);
+
+                    // 念のため設定から env を反映
+                    ApplyEnvFromSettings();
+                    AppStatus.SetOcrReady();
+                }
+                else
+                {
+                    // 見つかったが設定未保存の場合：解決→保存→env反映
+                    await ExternalAssets.ResolveAndCacheToolPathsAsync().ConfigureAwait(false);
+                    ApplyEnvFromSettings();
+                    AppStatus.SetOcrReady();
+
+                    // ★ 2回目以降の最新化はBGで（起動をブロックしない）
+                    _ = Task.Run(() => SetupExternalAssetsAsync());
+                }
             }
-            else
+            finally
             {
-                // ★ 2回目以降：起動をブロックしない（警告CS4014を出さないため discard）
-                _ = Task.Run(() => SetupExternalAssetsAsync());
+                Interlocked.Exchange(ref _assetsPrepareRunning, 0);
             }
+        }
+
+        /// <summary>
+        /// 設定に保存されたパスを環境変数へ反映（現プロセス）
+        /// </summary>
+        private static void ApplyEnvFromSettings()
+        {
+            var ext = AppSettings.Load().ExternalTools;
+
+            if (!string.IsNullOrEmpty(ext.PdfToText))
+                Environment.SetEnvironmentVariable("PDFTOTEXT_EXE", ext.PdfToText);
+            if (!string.IsNullOrEmpty(ext.PdfToPpm))
+                Environment.SetEnvironmentVariable("PDFTOPPM_EXE", ext.PdfToPpm);
+            if (!string.IsNullOrEmpty(ext.Tesseract))
+                Environment.SetEnvironmentVariable("TESSERACT_EXE", ext.Tesseract);
+
+            if (!string.IsNullOrEmpty(ext.TessdataDir))
+            {
+                var prefix = Path.GetDirectoryName(ext.TessdataDir);
+                if (!string.IsNullOrEmpty(prefix))
+                    Environment.SetEnvironmentVariable("TESSDATA_PREFIX", prefix);
+            }
+
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TESSERACT_LANG")))
+                Environment.SetEnvironmentVariable("TESSERACT_LANG", "jpn+eng");
         }
 
         /// <summary>
         /// すでに使用可能な Poppler/Tesseract があるか簡易チェック。
         /// env 変数 → 既知パス → assets 配下の順で軽く探す。
+        /// （※ 設定キャッシュは PrepareExternalAssetsAsync 側で先に判定）
         /// </summary>
         private static bool AreExternalToolsAvailableQuickCheck()
         {
@@ -235,7 +307,6 @@ namespace Explore
 
             return popplerOk && tessOk;
         }
-        // ========== ここまで：B案の実装 ==========
 
         /// <summary>
         /// 外部アセットの取得＆環境変数セット（重い処理。状況に応じて await/非同期で呼ぶ）
@@ -359,6 +430,22 @@ namespace Explore
                 System.Diagnostics.Debug.WriteLine($"{title}: {ex}\n -> {path}");
             }
             catch { }
+        }
+    }
+
+    /// <summary>
+    /// Aのための簡易ステータス。UI側で IsEnabled バインドやガードに使える。
+    /// </summary>
+    public static class AppStatus
+    {
+        public static bool IsOcrReady { get; private set; } = false;
+        public static event EventHandler? OcrReadyChanged;
+
+        public static void SetOcrReady()
+        {
+            if (IsOcrReady) return;
+            IsOcrReady = true;
+            try { OcrReadyChanged?.Invoke(null, EventArgs.Empty); } catch { }
         }
     }
 }

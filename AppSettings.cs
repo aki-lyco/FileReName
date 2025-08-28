@@ -8,6 +8,10 @@ namespace Explore
     {
         public DevSettings Dev { get; set; } = new();
         public FirstRunSettings FirstRun { get; set; } = new();
+
+        // ★ 追加：外部ツールの“見つかった実体パス”を保存（次回はこれだけ File.Exists で即判定）
+        public ExternalToolsSettings ExternalTools { get; set; } = new();
+
         public string[] SkipAttributes { get; set; } = new[] { "System", "Hidden", "Temporary", "Offline" };
         public string[] ExcludeDirectories { get; set; } = new[]
         {
@@ -67,5 +71,17 @@ namespace Explore
         public int HotMaxFiles { get; set; } = 5000;
         public bool ColdIndexInBackground { get; set; } = true;
         public int MinWarmCount { get; set; } = 100;
+    }
+
+    // ★ 追加
+    public sealed class ExternalToolsSettings
+    {
+        public string PdfToText { get; set; } = "";   // pdftotext.exe
+        public string PdfToPpm { get; set; } = "";   // pdftoppm.exe
+        public string Tesseract { get; set; } = "";   // tesseract.exe
+        public string TessdataDir { get; set; } = ""; // tessdata ディレクトリ
+
+        public DateTime? LastVerifiedUtc { get; set; }
+        public string? AssetsVersion { get; set; }    // 任意：AssetsManifest の version 等
     }
 }

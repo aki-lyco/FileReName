@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -14,6 +15,7 @@ namespace Explore
     /// %LOCALAPPDATA%\FileReName\external に取得・展開（または.exeならサイレント実行）するヘルパ。
     /// ・.zip / .whl : 解凍して subdir 配下に展開
     /// ・.exe        : /VERYSILENT /NORESTART でサイレントインストール（Inno Setup想定）
+    /// さらに：実体パスを AppSettings に保存し、次回は O(1) のクイックチェックを可能にする。
     /// </summary>
     public static class ExternalAssets
     {
@@ -45,6 +47,127 @@ namespace Explore
             Array.Sort(dirs, StringComparer.OrdinalIgnoreCase);
             return dirs[^1];
         }
+
+        // =====================================================================
+        // ここから追加：クイックチェック & パス解決・保存
+        // =====================================================================
+
+        /// <summary>
+        /// AppSettings に保存済みのフルパスだけを File.Exists/Directory.Exists で確認する“超高速”チェック。
+        /// 必要な 3exe + tessdata が揃っていれば true。
+        /// </summary>
+        public static bool QuickCheckFromSettings()
+        {
+            var s = AppSettings.Load().ExternalTools;
+
+            bool ok =
+                !string.IsNullOrEmpty(s.PdfToText) && File.Exists(s.PdfToText) &&
+                !string.IsNullOrEmpty(s.PdfToPpm) && File.Exists(s.PdfToPpm) &&
+                !string.IsNullOrEmpty(s.Tesseract) && File.Exists(s.Tesseract) &&
+                (string.IsNullOrEmpty(s.TessdataDir) || Directory.Exists(s.TessdataDir));
+
+            return ok;
+        }
+
+        /// <summary>
+        /// パス確定値を AppSettings に保存（次回 QuickCheck で O(1) 判定にする）
+        /// </summary>
+        public static void SaveResolvedToolPaths(string pdftotext, string pdftoppm, string tesseract, string tessdataDir, string? version = null)
+        {
+            var settings = AppSettings.Load();
+            settings.ExternalTools.PdfToText = pdftotext;
+            settings.ExternalTools.PdfToPpm = pdftoppm;
+            settings.ExternalTools.Tesseract = tesseract;
+            settings.ExternalTools.TessdataDir = tessdataDir;
+            settings.ExternalTools.LastVerifiedUtc = DateTime.UtcNow;
+            if (!string.IsNullOrEmpty(version))
+                settings.ExternalTools.AssetsVersion = version;
+            settings.Save();
+        }
+
+        /// <summary>
+        /// Program Files / ローカル external 配下などを探索して実体パスを確定→保存。
+        /// （重い再帰探索は“初回だけ”。以後は QuickCheckFromSettings で即判定）
+        /// </summary>
+        public static async Task ResolveAndCacheToolPathsAsync(IProgress<string>? log = null)
+        {
+            if (QuickCheckFromSettings())
+            {
+                log?.Report("✔ 外部ツール: 設定キャッシュで利用可能");
+                return;
+            }
+
+            // 1) まず Program Files などの既知インストール先を試す（Tesseract）
+            string[] pfCandidates = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Tesseract-OCR"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Tesseract-OCR")
+            };
+
+            string? tesseractExe = null;
+            string? tessdataDir = null;
+            foreach (var baseDir in pfCandidates.Where(Directory.Exists))
+            {
+                var exe = Path.Combine(baseDir, "tesseract.exe");
+                var td1 = Path.Combine(baseDir, "tessdata");
+                if (File.Exists(exe))
+                {
+                    tesseractExe = exe;
+                    if (Directory.Exists(td1)) tessdataDir = td1;
+                    break;
+                }
+            }
+
+            // 2) external\poppler\{latest}\... から pdftotext / pdftoppm を探索
+            string? pdftotext = null;
+            string? pdftoppm = null;
+
+            var popplerRoot = TryResolve("poppler");
+            if (popplerRoot != null && Directory.Exists(popplerRoot))
+            {
+                try
+                {
+                    // 再帰は初回だけ。以降は保存パスのみで即判定。
+                    pdftotext = Directory.EnumerateFiles(popplerRoot, "pdftotext.exe", SearchOption.AllDirectories).FirstOrDefault();
+                    pdftoppm = Directory.EnumerateFiles(popplerRoot, "pdftoppm.exe", SearchOption.AllDirectories).FirstOrDefault();
+                }
+                catch { /* パス長超等はスキップ */ }
+            }
+
+            // 3) external\tesseract\{latest}\... 配下に tesseract.exe / tessdata がある場合も探索（zip/whl 展開ケース）
+            if (tesseractExe == null)
+            {
+                var tesseractRoot = TryResolve("tesseract");
+                if (tesseractRoot != null && Directory.Exists(tesseractRoot))
+                {
+                    try
+                    {
+                        tesseractExe = Directory.EnumerateFiles(tesseractRoot, "tesseract.exe", SearchOption.AllDirectories).FirstOrDefault();
+                        // tessdata はディレクトリごと, 代表的なファイルの存在でチェック
+                        tessdataDir = Directory.EnumerateDirectories(tesseractRoot, "tessdata", SearchOption.AllDirectories)
+                                              .FirstOrDefault(d =>
+                                                  File.Exists(Path.Combine(d, "eng.traineddata")) ||
+                                                  File.Exists(Path.Combine(d, "jpn.traineddata")));
+                    }
+                    catch { /* スキップ */ }
+                }
+            }
+
+            if (pdftotext != null && pdftoppm != null && tesseractExe != null)
+            {
+                // tessdata は“空でも許容”。見つかっていれば保存（OCRの質は上がる）
+                SaveResolvedToolPaths(pdftotext, pdftoppm, tesseractExe, tessdataDir ?? "", null);
+                log?.Report("✔ 外部ツール: パスを確定して設定に保存しました");
+                return;
+            }
+
+            log?.Report("⚠ 外部ツール: 一部の実体が見つかりませんでした（初回の展開が未完了の可能性）");
+            await Task.CompletedTask;
+        }
+
+        // =====================================================================
+        // ここまで追加
+        // =====================================================================
 
         public static async Task EnsureAllAsync(Stream manifestJson, IProgress<string>? log = null)
         {
