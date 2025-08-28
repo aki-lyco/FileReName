@@ -2,98 +2,94 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- base brushes -->
-    <SolidColorBrush x:Key="TB.Fill"        Color="#F7FAFF"/>
-    <SolidColorBrush x:Key="TB.Fill.Hover"  Color="#EEF5FF"/>
-    <SolidColorBrush x:Key="TB.Fill.Press"  Color="#DFECFF"/>
-    <SolidColorBrush x:Key="TB.Border"      Color="#D5E2F2"/>
-    <SolidColorBrush x:Key="TB.Text"        Color="#22303C"/>
+	<!-- ===== MainWindow の見た目に合わせたパレット ===== -->
+	<SolidColorBrush x:Key="Pill.Bg"            Color="White"/>
+	<SolidColorBrush x:Key="Pill.Border"        Color="#D7DCE6"/>
+	<SolidColorBrush x:Key="Pill.Border.Hover"  Color="#7AA7FF"/>
+	<SolidColorBrush x:Key="Pill.Border.Active" Color="#377DFF"/>
+	<SolidColorBrush x:Key="Pill.Bg.Pressed"    Color="#EEF4FF"/>
+	<SolidColorBrush x:Key="Pill.Bg.Checked"    Color="#EAF2FF"/>
+	<SolidColorBrush x:Key="Pill.Text"          Color="#1C2A3A"/>
 
-    <!-- primary brushes -->
-    <SolidColorBrush x:Key="TB.Primary.Fill"       Color="#DDEBFF"/>
-    <SolidColorBrush x:Key="TB.Primary.Fill.Hover" Color="#D2E4FF"/>
-    <SolidColorBrush x:Key="TB.Primary.Fill.Press" Color="#C4DBFF"/>
-    <SolidColorBrush x:Key="TB.Primary.Border"     Color="#B0CDF8"/>
-    <SolidColorBrush x:Key="TB.Primary.Text"       Color="#1C2A3A"/>
+	<!-- ===== 共通テンプレート（角丸ピル） ===== -->
+	<Style x:Key="__PillBase" TargetType="Button">
+		<Setter Property="Background" Value="{StaticResource Pill.Bg}"/>
+		<Setter Property="BorderBrush" Value="{StaticResource Pill.Border}"/>
+		<Setter Property="BorderThickness" Value="1"/>
+		<Setter Property="Padding" Value="12,6"/>
+		<Setter Property="MinHeight" Value="32"/>
+		<Setter Property="MinWidth" Value="96"/>
+		<Setter Property="FontSize" Value="14"/>
+		<Setter Property="Foreground" Value="{StaticResource Pill.Text}"/>
+		<Setter Property="SnapsToDevicePixels" Value="True"/>
+		<Setter Property="Template">
+			<Setter.Value>
+				<ControlTemplate TargetType="Button">
+					<Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="12" Padding="{TemplateBinding Padding}">
+						<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+					</Border>
+					<ControlTemplate.Triggers>
+						<Trigger Property="IsMouseOver" Value="True">
+							<Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Pill.Border.Hover}"/>
+						</Trigger>
+						<Trigger Property="IsPressed" Value="True">
+							<Setter TargetName="Bd" Property="Background" Value="{StaticResource Pill.Bg.Pressed}"/>
+							<Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Pill.Border.Active}"/>
+						</Trigger>
+						<Trigger Property="IsKeyboardFocused" Value="True">
+							<Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Pill.Border.Hover}"/>
+						</Trigger>
+						<Trigger Property="IsEnabled" Value="False">
+							<Setter TargetName="Bd" Property="Opacity" Value="0.6"/>
+						</Trigger>
+					</ControlTemplate.Triggers>
+				</ControlTemplate>
+			</Setter.Value>
+		</Setter>
+	</Style>
 
-    <!-- pill button (base) -->
-    <Style x:Key="ToolbarButton" TargetType="Button">
-        <Setter Property="FontFamily" Value="Segoe UI"/>
-        <Setter Property="FontSize" Value="13"/>
-        <Setter Property="Foreground" Value="{StaticResource TB.Text}"/>
-        <Setter Property="Height" Value="34"/>
-        <Setter Property="MinWidth" Value="110"/>
-        <Setter Property="Padding" Value="14,6"/>
-        <Setter Property="Margin" Value="6,0,0,0"/>
-        <Setter Property="Background" Value="{StaticResource TB.Fill}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource TB.Border}"/>
-        <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd"
-                  Background="{TemplateBinding Background}"
-                  BorderBrush="{TemplateBinding BorderBrush}"
-                  BorderThickness="{TemplateBinding BorderThickness}"
-                  CornerRadius="12">
-                        <ContentPresenter HorizontalAlignment="Center"
-                              VerticalAlignment="Center"
-                              RecognizesAccessKey="True"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource TB.Fill.Hover}"/>
-                        </Trigger>
-                        <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource TB.Fill.Press}"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.55"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
+	<!-- デフォルト（白ピル） -->
+	<Style x:Key="ToolbarButton" TargetType="Button" BasedOn="{StaticResource __PillBase}"/>
 
-    <!-- pill button (primary) -->
-    <Style x:Key="ToolbarButton.Primary" BasedOn="{StaticResource ToolbarButton}" TargetType="Button">
-        <Setter Property="Foreground" Value="{StaticResource TB.Primary.Text}"/>
-        <Setter Property="Background" Value="{StaticResource TB.Primary.Fill}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource TB.Primary.Border}"/>
-        <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd"
-                  Background="{TemplateBinding Background}"
-                  BorderBrush="{TemplateBinding BorderBrush}"
-                  BorderThickness="{TemplateBinding BorderThickness}"
-                  CornerRadius="12">
-                        <ContentPresenter HorizontalAlignment="Center"
-                              VerticalAlignment="Center"
-                              RecognizesAccessKey="True"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource TB.Primary.Fill.Hover}"/>
-                        </Trigger>
-                        <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource TB.Primary.Fill.Press}"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.55"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
+	<!-- 強調版：Main の「選択状態」に近い淡青ピル（必要箇所で使用） -->
+	<Style x:Key="ToolbarButton.Primary" TargetType="Button" BasedOn="{StaticResource __PillBase}">
+		<Setter Property="FontWeight" Value="SemiBold"/>
+		<Setter Property="Background" Value="{StaticResource Pill.Bg.Checked}"/>
+		<Setter Property="BorderBrush" Value="{StaticResource Pill.Border.Active}"/>
+		<Setter Property="Template">
+			<Setter.Value>
+				<ControlTemplate TargetType="Button">
+					<Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="12" Padding="{TemplateBinding Padding}">
+						<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+					</Border>
+					<ControlTemplate.Triggers>
+						<Trigger Property="IsMouseOver" Value="True">
+							<Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Pill.Border.Hover}"/>
+						</Trigger>
+						<Trigger Property="IsPressed" Value="True">
+							<Setter TargetName="Bd" Property="Background" Value="{StaticResource Pill.Bg.Pressed}"/>
+							<Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Pill.Border.Active}"/>
+						</Trigger>
+						<Trigger Property="IsEnabled" Value="False">
+							<Setter TargetName="Bd" Property="Opacity" Value="0.6"/>
+						</Trigger>
+					</ControlTemplate.Triggers>
+				</ControlTemplate>
+			</Setter.Value>
+		</Setter>
+	</Style>
 
-    <!-- compact icon button -->
-    <Style x:Key="ToolbarIconButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
-        <Setter Property="MinWidth" Value="40"/>
-        <Setter Property="Padding" Value="10,6"/>
-    </Style>
+	<!-- アイコン用（幅だけ絞る。高さ・角丸・挙動は同じ） -->
+	<Style x:Key="ToolbarIconButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+		<Setter Property="MinWidth" Value="44"/>
+	</Style>
 
 </ResourceDictionary>
