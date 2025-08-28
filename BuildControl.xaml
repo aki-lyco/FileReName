@@ -4,12 +4,16 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:build="clr-namespace:Explore.Build"
+             xmlns:conv="clr-namespace:Explore.Converters"
              mc:Ignorable="d"
              d:DesignWidth="1100" d:DesignHeight="700">
 
 	<!-- コメントは連続ハイフンを含めない（== を使用） -->
 	<UserControl.Resources>
 		<BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+
+		<!-- 案A: フルパス→ファイル名への表示用コンバーター -->
+		<conv:PathToNameConverter x:Key="PathToNameConverter"/>
 
 		<Style x:Key="ToolbarButton" TargetType="Button">
 			<Setter Property="Margin" Value="4"/>
@@ -134,6 +138,13 @@
 									 Height="220"
 									 SelectionMode="Extended"
 									 KeyDown="SelectedList_KeyDown">
+								<!-- ★案A: ファイル名のみ表示、ツールチップでフルパス -->
+								<ListBox.ItemTemplate>
+									<DataTemplate>
+										<TextBlock Text="{Binding Converter={StaticResource PathToNameConverter}}"
+												   ToolTip="{Binding}"/>
+									</DataTemplate>
+								</ListBox.ItemTemplate>
 								<ListBox.ContextMenu>
 									<ContextMenu>
 										<MenuItem Header="選択を削除" Click="OnRemoveSelectedTargets"/>
@@ -295,6 +306,13 @@
 								 Height="360"
 								 SelectionMode="Extended"
 								 KeyDown="SelectedList_KeyDown">
+							<!-- ★案A: ファイル名のみ表示、ツールチップでフルパス -->
+							<ListBox.ItemTemplate>
+								<DataTemplate>
+									<TextBlock Text="{Binding Converter={StaticResource PathToNameConverter}}"
+											   ToolTip="{Binding}"/>
+								</DataTemplate>
+							</ListBox.ItemTemplate>
 							<ListBox.ContextMenu>
 								<ContextMenu>
 									<MenuItem Header="選択を削除" Click="OnRemoveSelectedTargets"/>
