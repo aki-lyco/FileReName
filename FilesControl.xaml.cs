@@ -499,14 +499,32 @@ namespace Explore
                 SessionExplorerState.ExpandedPaths.Remove(node.FullPath);
         }
 
+        // 大量ファイルの漸進追加用
+        private CancellationTokenSource? _loadCts;
+        private const int WarmShowCount = 100;  // 先頭に即出す件数（好みで 100～500）
+        private const int BatchSize = 100;  // 追加時のバッチ件数
+
         private async Task NavigateAndFillAsync(string? path)
         {
             if (string.IsNullOrWhiteSpace(path)) return;
 
+            // 前回の追加をキャンセル
+            _loadCts?.Cancel();
+            _loadCts = new CancellationTokenSource();
+            var ct = _loadCts.Token;
+
             await _vm.NavigateToAsync(path);
+
             Rows.Clear();
-            foreach (var f in _vm.Files)
+
+            // ★ FileEntry → FileItem に修正（両辺の型を合わせる）
+            var files = _vm.Files?.ToList() ?? new List<FileItem>();
+
+            // 先頭だけ即時に見せる
+            int warm = Math.Min(WarmShowCount, files.Count);
+            for (int i = 0; i < warm; i++)
             {
+                var f = files[i];
                 Rows.Add(new FileRow
                 {
                     FullPath = f.FullPath,
@@ -519,9 +537,53 @@ namespace Explore
 
             UpdatePinStar();
 
+            // 先頭分だけ鮮度を先に出す（体感重視）
             _fresh.InvalidateFreshnessCache(path);
-            await RefreshRowsFreshnessAsync(path);
-            _ = RecalcFreshnessPercentAsync(path);
+            _ = RefreshRowsFreshnessAsync(path);   // 先頭分がまず更新される
+
+            // 残りはバックグラウンドで段階追加
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    int index = warm;
+                    while (index < files.Count)
+                    {
+                        ct.ThrowIfCancellationRequested();
+
+                        var chunk = files.Skip(index).Take(BatchSize).Select(f => new FileRow
+                        {
+                            FullPath = f.FullPath,
+                            Name = f.Name,
+                            Extension = f.Extension,
+                            Size = f.Size,
+                            LastWriteTime = f.LastWriteTime
+                        }).ToList();
+
+                        // UI スレッドでまとめて追加
+                        await Dispatcher.InvokeAsync(() =>
+                        {
+                            foreach (var r in chunk) Rows.Add(r);
+                        });
+
+                        index += chunk.Count;
+
+                        // 追加した分の鮮度も少しずつ反映（重くならないように）
+                        _ = Dispatcher.InvokeAsync(async () =>
+                        {
+                            try { await RefreshRowsFreshnessAsync(path); } catch { }
+                        });
+
+                        // UI をブロックしないよう小休止
+                        await Task.Delay(1, ct);
+                    }
+
+                    // すべて追加し終えたら最終的な鮮度％を更新
+                    await Dispatcher.InvokeAsync(() => _ = RecalcFreshnessPercentAsync(path));
+                }
+                catch (OperationCanceledException) { /* 別フォルダへ移動など */ }
+                catch { /* 失敗は握りつぶす（UI保護） */ }
+            }, ct);
         }
 
         // Index 操作

@@ -11,6 +11,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 
+// 追加: Win32 列挙用
+using System.Runtime.InteropServices;
+using FILETIME = System.Runtime.InteropServices.ComTypes.FILETIME;
+
 namespace Explore.FileSystem
 {
     // ====== 共通ベース ======
@@ -44,6 +48,7 @@ namespace Explore.FileSystem
         public string Extension { get; }
         public long Size { get; }
         public DateTime LastWriteTime { get; }
+
         public FileItem(FileInfo fi)
         {
             Name = fi.Name;
@@ -51,6 +56,16 @@ namespace Explore.FileSystem
             Extension = fi.Extension;
             Size = fi.Exists ? fi.Length : 0;
             LastWriteTime = fi.Exists ? fi.LastWriteTime : DateTime.MinValue;
+        }
+
+        // ★追加: Win32 列挙から直接生成するための軽量コンストラクタ
+        public FileItem(string fullPath, string name, string? extension, long size, DateTime lastWriteTime)
+        {
+            FullPath = fullPath;
+            Name = name;
+            Extension = extension ?? System.IO.Path.GetExtension(name);
+            Size = size;
+            LastWriteTime = lastWriteTime;
         }
     }
 
@@ -132,26 +147,112 @@ namespace Explore.FileSystem
         {
             return await Task.Run(() =>
             {
-                var list = new List<FileItem>();
-                try
+                // ★ Win32 高速列挙 -> 失敗時はフォールバック
+                try { return (IReadOnlyList<FileItem>)FastEnumerateFiles(path, ct); }
+                catch
                 {
-                    foreach (var file in Directory.EnumerateFiles(path))
+                    var list = new List<FileItem>();
+                    try
                     {
-                        ct.ThrowIfCancellationRequested();
-                        try
+                        foreach (var file in Directory.EnumerateFiles(path))
                         {
-                            var fi = new FileInfo(file);
-                            if ((fi.Attributes & FileAttributes.Hidden) != 0) continue;
-                            if ((fi.Attributes & FileAttributes.System) != 0) continue;
-                            list.Add(new FileItem(fi));
+                            ct.ThrowIfCancellationRequested();
+                            try
+                            {
+                                var fi = new FileInfo(file);
+                                if ((fi.Attributes & FileAttributes.Hidden) != 0) continue;
+                                if ((fi.Attributes & FileAttributes.System) != 0) continue;
+                                list.Add(new FileItem(fi));
+                            }
+                            catch { /* skip 個別ファイル */ }
                         }
-                        catch { /* skip 個別ファイル */ }
                     }
+                    catch { /* skip */ }
+                    return (IReadOnlyList<FileItem>)list;
                 }
-                catch { /* skip */ }
-                return (IReadOnlyList<FileItem>)list;
             }, ct);
         }
+
+        #region Win32 fast enumeration
+        private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
+        private const int FIND_FIRST_EX_LARGE_FETCH = 0x00000002;
+
+        private enum FINDEX_INFO_LEVELS { Standard = 0, Basic = 1 }
+        private enum FINDEX_SEARCH_OPS { NameMatch = 0 }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WIN32_FIND_DATA
+        {
+            public FileAttributes dwFileAttributes;
+            public FILETIME ftCreationTime;
+            public FILETIME ftLastAccessTime;
+            public FILETIME ftLastWriteTime;
+            public uint nFileSizeHigh;
+            public uint nFileSizeLow;
+            public uint dwReserved0;
+            public uint dwReserved1;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string cFileName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)]
+            public string cAlternateFileName;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr FindFirstFileEx(
+            string lpFileName,
+            FINDEX_INFO_LEVELS fInfoLevelId,
+            out WIN32_FIND_DATA lpFindFileData,
+            FINDEX_SEARCH_OPS fSearchOp,
+            IntPtr lpSearchFilter,
+            int dwAdditionalFlags);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool FindNextFile(IntPtr hFindFile, out WIN32_FIND_DATA lpFindFileData);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool FindClose(IntPtr hFindFile);
+
+        private static List<FileItem> FastEnumerateFiles(string path, CancellationToken ct)
+        {
+            var list = new List<FileItem>();
+            var pattern = System.IO.Path.Combine(path, "*");
+
+            WIN32_FIND_DATA data;
+            var h = FindFirstFileEx(pattern, FINDEX_INFO_LEVELS.Basic, out data,
+                                    FINDEX_SEARCH_OPS.NameMatch, IntPtr.Zero, FIND_FIRST_EX_LARGE_FETCH);
+            if (h == INVALID_HANDLE_VALUE)
+                throw new IOException("FindFirstFileEx failed.");
+
+            try
+            {
+                do
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    var name = data.cFileName;
+                    if (name == "." || name == "..") continue;
+
+                    var attrs = data.dwFileAttributes;
+                    if ((attrs & FileAttributes.Directory) != 0) continue; // フォルダは除外
+                    if ((attrs & FileAttributes.Hidden) != 0) continue;
+                    if ((attrs & FileAttributes.System) != 0) continue;
+
+                    long size = ((long)data.nFileSizeHigh << 32) | data.nFileSizeLow;
+                    long ft = ((long)data.ftLastWriteTime.dwHighDateTime << 32) | (uint)data.ftLastWriteTime.dwLowDateTime;
+                    var lastWrite = DateTime.FromFileTimeUtc(ft).ToLocalTime();
+
+                    var full = System.IO.Path.Combine(path, name);
+                    var ext = System.IO.Path.GetExtension(name);
+
+                    list.Add(new FileItem(full, name, ext, size, lastWrite));
+                }
+                while (FindNextFile(h, out data));
+            }
+            finally { FindClose(h); }
+
+            return list;
+        }
+        #endregion
     }
 
     // ====== ViewModel（心臓部） ======
@@ -180,7 +281,7 @@ namespace Explore.FileSystem
             Roots.Clear();
             foreach (var d in _fs.GetLogicalDrives())
                 Roots.Add(FolderNode.Create(d));
-            
+
             if (Roots.Count == 0)
             {
                 var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
