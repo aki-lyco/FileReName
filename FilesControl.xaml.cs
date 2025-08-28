@@ -282,20 +282,62 @@ namespace Explore
             }
         }
 
-        // Shift + ホイールで横スクロール（補助）
+        // スクロール調整
+        private readonly double _verticalScrollPixelFactor = 0.30; // DataGrid 縦：小さいほどゆっくり（既存）
+        private const int _treeBaseLinesPerNotch = 1;              // TreeView 基準：1ノッチ=1行相当
+        private readonly double _treeScrollFactor = 0.95;          // ★ TreeView 縦：係数 0.75（ゆっくり）
+        private double _treeWheelAccumulator = 0.0;                 // 端数の蓄積（0.75行→次ノッチで1行に）
+
+        // Shift+ホイール=横、通常ホイール=縦（減速）
         private void OnPreviewMouseWheelForHorizontal(object sender, WpfInput.MouseWheelEventArgs e)
         {
-            if (WpfInput.Keyboard.Modifiers != WpfInput.ModifierKeys.Shift) return;
+            // 対象の ScrollViewer を特定
+            var sv = (sender == (object)FilesGrid) ? _filesScroll
+                     : (sender == (object)FolderTree) ? _treeScroll
+                     : null;
+            if (sv == null) return;
 
-            var sv = (sender == (object)FilesGrid) ? _filesScroll :
-                     (sender == (object)FolderTree) ? _treeScroll : null;
-
-            if (sv != null)
+            // ---- 横スクロール（Shift押下時） ----
+            if (WpfInput.Keyboard.Modifiers == WpfInput.ModifierKeys.Shift)
             {
+                // 既存通り：Delta>0 を右へ
                 sv.ScrollToHorizontalOffset(sv.HorizontalOffset + e.Delta);
+                e.Handled = true;
+                return;
+            }
+
+            // ---- 縦スクロール（減速）----
+            if (sender == (object)FilesGrid)
+            {
+                // DataGrid はピクセルスクロールなので、Delta を小さく反映
+                // Delta>0（上回し）→ Offset を小さく（上へ）
+                double target = sv.VerticalOffset - (e.Delta * _verticalScrollPixelFactor);
+                if (target < 0) target = 0;
+                if (target > sv.ScrollableHeight) target = sv.ScrollableHeight;
+                sv.ScrollToVerticalOffset(target);
+                e.Handled = true;
+            }
+            else if (sender == (object)FolderTree)
+            {
+                // OS既定の「1ノッチ=120」から、係数0.75行ぶんだけ動かす（端数は累積）
+                double notches = Math.Abs(e.Delta) / 120.0;
+                double lines = notches * _treeBaseLinesPerNotch * _treeScrollFactor;
+
+                _treeWheelAccumulator += lines;
+                int steps = (int)Math.Floor(_treeWheelAccumulator);
+                _treeWheelAccumulator -= steps;
+
+                if (steps > 0)
+                {
+                    if (e.Delta > 0) { for (int i = 0; i < steps; i++) _treeScroll!.LineUp(); }
+                    else { for (int i = 0; i < steps; i++) _treeScroll!.LineDown(); }
+                }
+
+                // 既定処理は使わず、こちらで制御
                 e.Handled = true;
             }
         }
+
 
         // Win32: 横ホイール（WM_MOUSEHWHEEL）で横スクロール
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
