@@ -241,18 +241,24 @@ namespace Explore.Build
             return text.Length <= 200 ? text : text.Substring(0, 200);
         }
 
+        // ★ドライランでディスクを汚さないため、ここではフォルダを作らない
         private static string GetAvailableName(string destDirAbs, string fileName)
         {
-            Directory.CreateDirectory(destDirAbs);
+            // Directory.CreateDirectory(destDirAbs);  // ←削除！
+
             var name = Path.GetFileNameWithoutExtension(fileName);
             var ext = Path.GetExtension(fileName);
-            var cand = Path.Combine(destDirAbs, fileName);
-            if (!File.Exists(cand)) return cand;
+
+            // 目的ディレクトリが存在しない場合でも、ここは「想定される最終パス」を返すだけ
+            // 実際にフォルダを作るのは PlanApplier.ApplyAsync 内
+            var candidate = Path.Combine(destDirAbs, fileName);
+            if (!File.Exists(candidate)) return candidate;
+
             int i = 1;
             while (true)
             {
-                cand = Path.Combine(destDirAbs, $"{name} ({i}){ext}");
-                if (!File.Exists(cand)) return cand;
+                candidate = Path.Combine(destDirAbs, $"{name} ({i}){ext}");
+                if (!File.Exists(candidate)) return candidate;
                 i++;
             }
         }
