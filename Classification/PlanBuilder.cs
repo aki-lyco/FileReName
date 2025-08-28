@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text;
 using System.Text.Json;
 using Explore.FileSystem;   // PathUtils
 using Explore.Indexing;     // IndexDatabase, FileKeyUtil
@@ -28,7 +29,7 @@ namespace Explore.Build
             // 未分類の相対パス
             string uncRel = NormalizeRel(root.Children.First(c => c.IsRequired).RelPath);
 
-            // カテゴリ定義（Keywords は string[] 固定に）
+            // カテゴリ定義（未分類以外、RelPathが空でないノードのみ）
             var categoryDefs = root.FlattenTree()
                                    .Where(n => !n.IsRequired && !string.IsNullOrWhiteSpace(n.RelPath))
                                    .Select(n => new CategoryDef(
@@ -55,7 +56,6 @@ namespace Explore.Build
                 var fi = new FileInfo(full);
                 var extNoDot = (fi.Extension ?? string.Empty).TrimStart('.');
 
-                // FileMeta(Name, Ext, FullPath, Mtime, SizeBytes)
                 var meta = new FileMeta(
                     fi.Name,
                     extNoDot,
@@ -63,25 +63,53 @@ namespace Explore.Build
                     new DateTimeOffset(fi.LastWriteTimeUtc),
                     fi.Exists ? fi.Length : 0);
 
-                // テキスト抽出
-                var raw = await TextExtractor.ExtractAsync(full);
-                var text = TextExtractor.NormalizeAndTrim(raw);
-
-                // ★本文が空なら、ファイル名＋親フォルダ名から疑似本文を作る（Popplerが無い/薄いPDFでも分類を安定化）
+                // ========== テキスト抽出 or ファイル名コンテキスト ==========
+                string text = await TextExtractor.ExtractAsync(full);
                 if (string.IsNullOrWhiteSpace(text))
                     text = BuildFilenameContext(fi);
 
-                // ★ログは「AIへ渡す最終テキスト」で記録（フォールバック後なので len>0 になるはず）
+                // ========== 画像なら OCR + 画像を添付 ==========
+                byte[]? imgBytes = null;
+                string? imgMime = null;
+                if (LooksLikeImage(fi.Extension))
+                {
+                    var img = await TextExtractor.ExtractImageAsync(full);
+                    if (!string.IsNullOrWhiteSpace(img.OcrText))
+                        text = string.Join("\n", new[] { text, "[OCR]", img.OcrText }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+                    imgBytes = img.ImageBytes;
+                    imgMime = img.ImageMime;
+                }
+
                 AppendExtractLog(full, text);
 
-                // AI分類
-                var req = new AiClassifyRequest(classificationBasePath, uncRel, categoryDefs, meta, text);
+                // ========== AI分類 ==========
+                var req = new AiClassifyRequest(
+                    classificationBasePath,
+                    uncRel,
+                    categoryDefs,
+                    meta,
+                    TextExtractor.NormalizeAndTrim(text, 8 * 1024),
+                    imgBytes,
+                    imgMime
+                );
+
                 var result = await classifier.ClassifyAsync(req, ct);
 
-                // しきい値で未分類にフォールバック
-                string chosenRel = (result.Confidence < threshold || string.IsNullOrWhiteSpace(result.ClassifiedRelPath))
+                // しきい値判定
+                string modelPath = (result.ClassifiedRelPath ?? "").Trim();
+                string chosenRel = (result.Confidence < threshold || string.IsNullOrWhiteSpace(modelPath))
                     ? uncRel
-                    : NormalizeRel(result.ClassifiedRelPath);
+                    : NormalizeRel(modelPath);
+
+                // ★ 詳細ログ（Plan側）
+                AppendClassifyLog(
+                    fullPath: full,
+                    modelPath: modelPath,
+                    chosenRel: chosenRel,
+                    confidence: result.Confidence,
+                    imageBytes: imgBytes?.Length ?? 0
+                );
 
                 // DB: 提案 + summary/snippet/tags を保存
                 var key = FileKeyUtil.GetStableKey(full);
@@ -98,16 +126,17 @@ namespace Explore.Build
                 string destDirAbs = PathUtils.CombineBase(classificationBasePath, chosenRel);
                 string destAbs = GetAvailableName(destDirAbs, fi.Name);
 
+                var moveReason = chosenRel == uncRel ? "fallback" : "classified";
                 if (!string.Equals(fi.FullName, destAbs, StringComparison.OrdinalIgnoreCase))
                 {
-                    moves.Add(new MoveItem(fi.FullName, destAbs, result.Confidence >= threshold ? "classified" : "fallback"));
+                    moves.Add(new MoveItem(fi.FullName, destAbs, moveReason));
                 }
 
                 if (chosenRel == uncRel)
                     unresolved.Add(fi.FullName);
             }
 
-            // 作成すべきディレクトリ（Relに戻して CreateDir）
+            // 作成すべきディレクトリ
             var createDirs = moves
                 .Select(m => Path.GetDirectoryName(m.DestFullPath)!)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -133,6 +162,14 @@ namespace Explore.Build
         }
 
         // === helpers ===
+
+        private static bool LooksLikeImage(string? ext)
+        {
+            var e = (ext ?? "").ToLowerInvariant();
+            return e is ".png" or ".jpg" or ".jpeg" or ".jfif"
+                   or ".webp" or ".bmp" or ".gif"
+                   or ".tif" or ".tiff" or ".heic" or ".heif" or ".avif";
+        }
 
         private static IEnumerable<string> ExpandTargets(IReadOnlyList<string> targets)
         {
@@ -169,7 +206,6 @@ namespace Explore.Build
             return rel;
         }
 
-        // ★常に string[] を返す（空なら Array.Empty<string>()）
         private static string[] ParseKeywords(string? jsonOrCsv)
         {
             if (string.IsNullOrWhiteSpace(jsonOrCsv)) return Array.Empty<string>();
@@ -188,7 +224,7 @@ namespace Explore.Build
                 }
                 catch
                 {
-                    // JSONで解釈できなければ CSV にフォールバック
+                    // JSON が壊れていた場合は CSV へフォールバック
                 }
             }
 
@@ -231,9 +267,7 @@ namespace Explore.Build
         }
 
         /// <summary>
-        /// 本文抽出が空のときに、AIへのヒントとして
-        /// 「ファイル名（拡張子なし）＋親/祖父フォルダ名」をスペース結合で返す
-        /// 例: 『R6_前期_日本史』 + 『日本史』 + 『2年_過去問』
+        /// 本文抽出が空のときのヒント（ファイル名＋親/祖父フォルダ名）
         /// </summary>
         private static string BuildFilenameContext(FileInfo fi)
         {
@@ -253,7 +287,7 @@ namespace Explore.Build
             return string.Join(" ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
         }
 
-        /// <summary>%LOCALAPPDATA%\FileReName\logs\extract_YYYYMMDD.log に抽出ログを追記</summary>
+        /// <summary>%LOCALAPPDATA%\FileReName\logs\extract_YYYYMMDD.log</summary>
         private static void AppendExtractLog(string fullPath, string? normalizedText)
         {
             try
@@ -266,16 +300,28 @@ namespace Explore.Build
                 var len = string.IsNullOrEmpty(normalizedText) ? 0 : normalizedText.Length;
                 var ok200 = len >= 200 ? "OK200" : "LT200";
                 var head = normalizedText ?? string.Empty;
-                if (head.Length > 200) head = head.Substring(0, 200);
+                if (head.Length > 200) head = head[..200];
                 head = head.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
 
                 var line = $"{DateTime.Now:O}\t{ok200}\t{len}\t{fullPath}\t{head}\n";
-                File.AppendAllText(logPath, line, System.Text.Encoding.UTF8);
+                File.AppendAllText(logPath, line, Encoding.UTF8);
             }
-            catch
+            catch { /* ignore */ }
+        }
+
+        /// <summary>%LOCALAPPDATA%\FileReName\logs\classify_YYYYMMDD.log</summary>
+        private static void AppendClassifyLog(string fullPath, string modelPath, string chosenRel, double confidence, int imageBytes)
+        {
+            try
             {
-                // ログ失敗は無視
+                var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                var dir = Path.Combine(appData, "FileReName", "logs");
+                Directory.CreateDirectory(dir);
+                var log = Path.Combine(dir, $"classify_{DateTime.Now:yyyyMMdd}.log");
+                var line = $"{DateTime.Now:O}\tmodelPath={modelPath}\tchosen={chosenRel}\tconf={confidence:F3}\timageBytes={imageBytes}\t{fullPath}\n";
+                File.AppendAllText(log, line, Encoding.UTF8);
             }
+            catch { /* ignore */ }
         }
     }
 }

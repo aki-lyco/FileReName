@@ -5,10 +5,15 @@ using System.Threading.Tasks;
 
 namespace Explore.Build
 {
+    // 画像入力にも対応するため、InlineImage / ImageMime を末尾に追加（既存呼び出しはそのままでもOK）
     public sealed record AiClassifyRequest(
-      string BasePath, string UncategorizedRelPath,
+      string BasePath,
+      string UncategorizedRelPath,
       IReadOnlyList<CategoryDef> Categories,
-      FileMeta File, string ExtractedText
+      FileMeta File,
+      string ExtractedText,
+      byte[]? InlineImage = null,
+      string? ImageMime = null
     );
 
     public sealed record CategoryDef(

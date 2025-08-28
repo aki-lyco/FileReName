@@ -32,7 +32,7 @@ namespace Explore.Build
         /// <summary>
         /// ファイルからテキスト抽出。PDFは
         /// ①pdftotext → ②pdftoppm+tesseract → ③Python(PyMuPDF)+tesseract の順で試す。
-        /// 抽出後は正規化して 4〜8KB に整える（既定 8KB）。
+        /// 抽出後は正規化して最大8KBに整える。
         /// </summary>
         public static async Task<string> ExtractAsync(string path, int maxBytes = 8 * 1024)
         {
@@ -55,31 +55,95 @@ namespace Explore.Build
                 {
                     // 1) pdftotext
                     var raw = await TryPdfToTextAsync(path);
-
                     if (string.IsNullOrWhiteSpace(raw))
                     {
-                        // 2) Poppler(+tesseract) OCR フォールバック
+                        // 2) Poppler(+tesseract) OCR
                         raw = await TryOcrPdfAsync(path, firstPages: 2, dpi: 300);
                     }
-
                     if (string.IsNullOrWhiteSpace(raw))
                     {
-                        // 3) Python(PyMuPDF + Tesseract) フォールバック（Poppler不要）
+                        // 3) Python(PyMuPDF + Tesseract)
                         raw = await TryOcrPdfViaPythonAsync(path, firstPages: 2, dpi: 300);
                     }
-
                     return NormalizeAndTrim(raw, maxBytes);
                 }
             }
             catch
             {
-                // いずれも失敗時は空を返す
+                // 失敗時は空
             }
-
             return string.Empty;
         }
 
-        // --------- helpers ----------
+        // ================= 画像対応（追加） =================
+
+        public sealed class ImageExtractResult
+        {
+            public string OcrText { get; init; } = "";
+            public byte[]? ImageBytes { get; init; }
+            public string? ImageMime { get; init; }
+        }
+
+        /// <summary>
+        /// 画像ファイル（png/jpg/webp/bmp/tif）から OCR テキスト＋画像バイトを取得
+        /// </summary>
+        public static async Task<ImageExtractResult> ExtractImageAsync(string path)
+        {
+            var ext = (Path.GetExtension(path) ?? string.Empty).ToLowerInvariant();
+            string mime = ext switch
+            {
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                ".bmp" => "image/bmp",
+                ".tif" or ".tiff" => "image/tiff",
+                _ => "application/octet-stream"
+            };
+
+            // OCR（Tesseract 未導入なら空でOK）
+            string ocr = await TryTesseractOnImageAsync(path);
+
+            // バイト列（必要に応じてサイズ最適化は将来対応）
+            byte[] bytes = Array.Empty<byte>();
+            try { bytes = await File.ReadAllBytesAsync(path); } catch { /* ignore */ }
+
+            return new ImageExtractResult
+            {
+                OcrText = NormalizeAndTrim(ocr, 8 * 1024),
+                ImageBytes = bytes.Length > 0 ? bytes : null,
+                ImageMime = mime
+            };
+        }
+
+        private static async Task<string> TryTesseractOnImageAsync(string imagePath)
+        {
+            try
+            {
+                if (!File.Exists(TesseractExe)) return string.Empty;
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = TesseractExe,
+                    Arguments = $"\"{imagePath}\" stdout -l {TesseractLang}",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8
+                };
+                var p = Process.Start(psi);
+                if (p == null) return string.Empty;
+                using (p)
+                {
+                    var text = await p.StandardOutput.ReadToEndAsync();
+                    await p.WaitForExitAsync();
+                    return text ?? string.Empty;
+                }
+            }
+            catch { return string.Empty; }
+        }
+
+        // ================= 既存ヘルパ =================
 
         private static async Task<string> TryPdfToTextAsync(string pdfPath)
         {
@@ -88,7 +152,6 @@ namespace Explore.Build
                 if (!File.Exists(PdftotextExe))
                     return string.Empty;
 
-                // pdftotext -layout -q PDF -
                 var psi = new ProcessStartInfo
                 {
                     FileName = PdftotextExe,
@@ -111,10 +174,8 @@ namespace Explore.Build
             catch { return string.Empty; }
         }
 
-        /// <summary>Poppler(pdftoppm)で画像化 → TesseractでOCR</summary>
         private static async Task<string> TryOcrPdfAsync(string pdfPath, int firstPages, int dpi)
         {
-            // pdftoppm で PNG にレンダリング → tesseract で OCR
             if (!File.Exists(PdftoppmExe) || !File.Exists(TesseractExe))
                 return string.Empty;
 
@@ -124,7 +185,6 @@ namespace Explore.Build
 
             try
             {
-                // pdftoppm -r 300 -png -f 1 -l {firstPages} "in.pdf" "outprefix"
                 var outPrefix = Path.Combine(work, "page");
                 var ppm = new ProcessStartInfo
                 {
@@ -136,10 +196,7 @@ namespace Explore.Build
                     CreateNoWindow = true
                 };
                 var p1 = Process.Start(ppm);
-                if (p1 != null)
-                {
-                    using (p1) { await p1.WaitForExitAsync(); }
-                }
+                if (p1 != null) using (p1) { await p1.WaitForExitAsync(); }
 
                 var images = Directory.EnumerateFiles(work, "page-*.png").OrderBy(x => x).ToList();
                 if (images.Count == 0) return string.Empty;
@@ -163,8 +220,7 @@ namespace Explore.Build
                     {
                         var text = await p2.StandardOutput.ReadToEndAsync();
                         await p2.WaitForExitAsync();
-                        if (!string.IsNullOrEmpty(text))
-                            sb.AppendLine(text);
+                        if (!string.IsNullOrEmpty(text)) sb.AppendLine(text);
                     }
                 }
                 return sb.ToString();
@@ -176,21 +232,14 @@ namespace Explore.Build
             }
         }
 
-        /// <summary>
-        /// Popplerが無い環境向けのフォールバック。
-        /// Python + PyMuPDF でPDFをラスタライズ → TesseractでOCR
-        /// </summary>
         private static async Task<string> TryOcrPdfViaPythonAsync(string pdfPath, int firstPages, int dpi)
         {
-            // Tesseract は必須（Python側からも使う）
             if (!File.Exists(TesseractExe))
                 return string.Empty;
 
-            // Python 実行ファイル（指定なければ python → py の順で試す）
             string? python = Environment.GetEnvironmentVariable("PYTHON_EXE");
             if (string.IsNullOrWhiteSpace(python)) python = "python";
 
-            // 一時スクリプト生成
             var work = Path.Combine(Path.GetTempPath(), $"fr_pyocr_{Guid.NewGuid():N}");
             Directory.CreateDirectory(work);
             var scriptPath = Path.Combine(work, "ocr_pdf_to_text.py");
@@ -233,7 +282,6 @@ except Exception:
                 try { proc = Process.Start(psi); }
                 catch
                 {
-                    // Python ランチャ（py -3）も試す
                     psi.FileName = "py";
                     psi.Arguments = $"-3 \"{scriptPath}\"";
                     try { proc = Process.Start(psi); } catch { return string.Empty; }
@@ -254,12 +302,11 @@ except Exception:
             }
         }
 
-        // -------- .docx を軽くテキスト化（Zip内の XML をタグ除去） --------
+        // -------- .docx を軽くテキスト化 --------
         private static string ExtractDocx(string path)
         {
             try
             {
-                // .docx = zip(word/document.xml) を雑にテキスト化
                 using var zip = System.IO.Compression.ZipFile.OpenRead(path);
                 var entry = zip.GetEntry("word/document.xml");
                 if (entry == null) return string.Empty;
@@ -273,12 +320,10 @@ except Exception:
             catch { return string.Empty; }
         }
 
-        /// <summary>改行・空白を整え、UTF-8 の境界を壊さないように最大バイト長で丸める</summary>
+        /// <summary>改行・空白を整え、UTF-8境界を壊さないよう最大バイト長で丸める</summary>
         public static string NormalizeAndTrim(string s, int maxBytes = 8 * 1024)
         {
             if (string.IsNullOrWhiteSpace(s)) return string.Empty;
-
-            // 改行/空白をつめる
             s = Regex.Replace(s, @"[ \t]+", " ");
             s = Regex.Replace(s, @"\s*\r?\n\s*", "\n");
             s = Regex.Replace(s, @"\n{3,}", "\n\n").Trim();
@@ -286,7 +331,6 @@ except Exception:
             var bytes = Encoding.UTF8.GetBytes(s);
             if (bytes.Length <= maxBytes) return s;
 
-            // UTF-8 の境界を壊さないように丸める
             var len = maxBytes;
             while (len > 0 && (bytes[len - 1] & 0xC0) == 0x80) len--;
             return Encoding.UTF8.GetString(bytes, 0, len);
