@@ -32,7 +32,7 @@
 					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
 				</Trigger>
 
-				<!-- ★追加：未選択時のホバー色（テーマのブラシを使用） -->
+				<!-- ★追加：未選択時のホバー色 -->
 				<MultiTrigger>
 					<MultiTrigger.Conditions>
 						<Condition Property="IsMouseOver" Value="True"/>
@@ -72,7 +72,7 @@
 			<Setter Property="FocusVisualStyle" Value="{x:Null}"/>
 		</Style>
 
-		<!-- ========= TreeView ヘッダー（左側）：選択時の薄青＋黒枠、文字は黒 ========= -->
+		<!-- ========= TreeView ヘッダー ========= -->
 		<!-- クイックアクセス：グループ -->
 		<HierarchicalDataTemplate DataType="{x:Type local:QuickAccessGroup}" ItemsSource="{Binding Items}">
 			<Border x:Name="SelBd" Background="Transparent" BorderBrush="Transparent"
@@ -172,7 +172,6 @@
 		<!-- ===== Toolbar modern styles ===== -->
 		<SolidColorBrush x:Key="Tb.Fg" Color="#222" />
 		<SolidColorBrush x:Key="Tb.Bg" Color="#F6F7F9" />
-		<!-- 既存 Hover/Pressed/Border など -->
 		<SolidColorBrush x:Key="Tb.BgHover" Color="#EEF1F6" />
 		<SolidColorBrush x:Key="Tb.BgPressed" Color="#E5E9F1" />
 		<SolidColorBrush x:Key="Tb.Border" Color="#D0D5DD" />
@@ -293,7 +292,7 @@
 				<Button x:Name="BtnNewCreate" Content="新規作成" Margin="0,0,8,0" Style="{StaticResource ToolbarButton}"/>
 				<Separator Width="8"/>
 
-				<!-- ▼ このフォルダを同期：アイコンのみ（32px）、ボタンは 44px。ホバーで「DBに追加」 -->
+				<!-- ▼ このフォルダを同期 -->
 				<Button x:Name="BtnIndex"
                         Style="{StaticResource ToolbarIconButton}"
                         Width="44" Height="44"
@@ -385,12 +384,15 @@
 
 			<!-- フォルダツリー -->
 			<Border Grid.Column="0" BorderBrush="#E6E6E6" BorderThickness="0,0,1,0">
+				<!-- ★ 横スクロールバー＆パニングを有効化（仮想化は維持） -->
 				<TreeView x:Name="FolderTree"
-                          ItemsSource="{Binding TreeItems}"
-                          ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
-                          VirtualizingStackPanel.IsVirtualizing="True"
-                          VirtualizingPanel.ScrollUnit="Item"
-                          ScrollViewer.CanContentScroll="True">
+						  ItemsSource="{Binding TreeItems}"
+						  ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
+						  VirtualizingStackPanel.IsVirtualizing="True"
+						  VirtualizingPanel.ScrollUnit="Item"
+						  ScrollViewer.CanContentScroll="True"
+						  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+						  ScrollViewer.PanningMode="Both">
 
 					<!-- 既定の濃い青ハイライトを無効化（TreeView 内スコープ） -->
 					<TreeView.Resources>
@@ -401,6 +403,7 @@
 				</TreeView>
 			</Border>
 
+
 			<!-- 仕切り -->
 			<GridSplitter Grid.Column="1"
                           HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
@@ -408,47 +411,53 @@
 
 			<!-- ファイル一覧 -->
 			<Grid Grid.Column="2">
+				<!-- ★ 横スクロールを有効化し、列幅は固定。隠れた分は横スクロールで表示 -->
 				<DataGrid x:Name="FilesGrid"
-                          ItemsSource="{Binding Rows}"
-                          AutoGenerateColumns="False"
-                          HeadersVisibility="Column"
-                          GridLinesVisibility="None"
-                          CanUserAddRows="False"
-                          SelectionMode="Extended"
-                          SelectionUnit="FullRow"
-                          EnableRowVirtualization="True"
-                          EnableColumnVirtualization="True"
-                          ScrollViewer.CanContentScroll="True"
-                          RowHeaderWidth="0"
-						  IsReadOnly="True">
+						  ItemsSource="{Binding Rows}"
+						  AutoGenerateColumns="False"
+						  HeadersVisibility="Column"
+						  GridLinesVisibility="None"
+						  CanUserAddRows="False"
+						  SelectionMode="Extended"
+						  SelectionUnit="FullRow"
+						  EnableRowVirtualization="True"
+						  EnableColumnVirtualization="True"
+						  RowHeaderWidth="0"
+						  IsReadOnly="True"
+						  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+						  ScrollViewer.VerticalScrollBarVisibility="Auto"
+						  ScrollViewer.CanContentScroll="False"
+						  VirtualizingPanel.ScrollUnit="Pixel"
+						  ScrollViewer.PanningMode="HorizontalOnly">
 					<DataGrid.Columns>
 						<!-- 左端チェック列 -->
 						<DataGridTemplateColumn Width="40" IsReadOnly="False">
 							<DataGridTemplateColumn.HeaderTemplate>
 								<DataTemplate>
 									<CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
-                                              Click="OnHeaderCheckAllClick"/>
+											  Click="OnHeaderCheckAllClick"/>
 								</DataTemplate>
 							</DataGridTemplateColumn.HeaderTemplate>
 							<DataGridTemplateColumn.CellTemplate>
 								<DataTemplate>
 									<CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"
-                                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
+											  HorizontalAlignment="Center" VerticalAlignment="Center"/>
 								</DataTemplate>
 							</DataGridTemplateColumn.CellTemplate>
 						</DataGridTemplateColumn>
 
-						<!-- 種類アイコン列（拡張子から取得） -->
+						<!-- 種類アイコン列 -->
 						<DataGridTemplateColumn Width="36" IsReadOnly="True">
 							<DataGridTemplateColumn.CellTemplate>
 								<DataTemplate>
 									<Image Width="16" Height="16" Margin="2"
-                                           Source="{Binding Extension, Converter={StaticResource PathToIcon}}"/>
+										   Source="{Binding Extension, Converter={StaticResource PathToIcon}}"/>
 								</DataTemplate>
 							</DataGridTemplateColumn.CellTemplate>
 						</DataGridTemplateColumn>
 
-						<DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="*" />
+						<!-- ★ 固定幅 -->
+						<DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="320" />
 						<DataGridTextColumn Header="拡張子" Binding="{Binding Extension}" Width="120"/>
 						<DataGridTextColumn Header="サイズ" Binding="{Binding Size, StringFormat={}{0:N0}}" Width="140"/>
 
@@ -456,21 +465,22 @@
 						<DataGridTemplateColumn Header="鮮度" Width="110" IsReadOnly="True">
 							<DataGridTemplateColumn.CellTemplate>
 								<DataTemplate>
-									<StackPanel Orientation="Horizontal" VerticalAlignment="Center" ToolTip="{Binding FreshState, Converter={StaticResource FreshTip}}">
+									<StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+												ToolTip="{Binding FreshState, Converter={StaticResource FreshTip}}">
 										<Ellipse Width="8" Height="8"
-                                                 Fill="{Binding FreshState, Converter={StaticResource FreshBrush}}"
-                                                 Margin="0,0,6,0"/>
+												 Fill="{Binding FreshState, Converter={StaticResource FreshBrush}}"
+												 Margin="0,0,6,0"/>
 										<TextBlock Text="{Binding FreshState, Converter={StaticResource FreshText}}"
-                                                   Foreground="#555"
-                                                   VerticalAlignment="Center"/>
+												   Foreground="#555"
+												   VerticalAlignment="Center"/>
 									</StackPanel>
 								</DataTemplate>
 							</DataGridTemplateColumn.CellTemplate>
 						</DataGridTemplateColumn>
 
 						<DataGridTextColumn Header="更新日時"
-                                            Binding="{Binding LastWriteTime, StringFormat={}{0:yyyy-MM-dd HH:mm}}"
-                                            Width="180"/>
+											Binding="{Binding LastWriteTime, StringFormat={}{0:yyyy-MM-dd HH:mm}}"
+											Width="180"/>
 					</DataGrid.Columns>
 				</DataGrid>
 			</Grid>

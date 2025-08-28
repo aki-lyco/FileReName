@@ -18,6 +18,7 @@ using System.Windows.Media;
 using Explore.FileSystem;
 using Explore.Indexing;
 using Microsoft.Data.Sqlite;
+using System.Windows.Interop; // ★ 追加：HwndSource
 
 // WPF型を明示するためのエイリアス
 using WpfMessageBox = System.Windows.MessageBox;
@@ -174,6 +175,11 @@ namespace Explore
         // クイックアクセス保持
         private readonly ObservableCollection<string> _pinnedPaths = new();
 
+        // ★ 追加：横スクロール対応
+        private HwndSource? _hwndSource;
+        private ScrollViewer? _filesScroll;
+        private ScrollViewer? _treeScroll;
+
         public FilesControl()
         {
             InitializeComponent();
@@ -204,7 +210,15 @@ namespace Explore
             FilesGrid.PreviewMouseMove += OnFilesGrid_PreviewMouseMove_ForDrag;
             FilesGrid.PreviewMouseRightButtonDown += FilesGrid_PreviewMouseRightButtonDown;
             FilesGrid.ContextMenuOpening += FilesGrid_ContextMenuOpening;
-            FilesGrid.CellEditEnding += OnFilesGridCellEditEnding; // ← 右クリックからの「名前変更」用
+            FilesGrid.CellEditEnding += OnFilesGridCellEditEnding;
+
+            // ★ 追加：横スクロールの補助（Shift+ホイール）
+            FilesGrid.PreviewMouseWheel += OnPreviewMouseWheelForHorizontal;
+            FolderTree.PreviewMouseWheel += OnPreviewMouseWheelForHorizontal;
+
+            // ★ 追加：Win32 横ホイールフックの準備
+            this.Loaded += OnPadScrollLoaded;
+            this.Unloaded += OnPadScrollUnloaded;
 
             this.AllowDrop = true;
             this.DragOver += OnRootDragOver;
@@ -246,6 +260,93 @@ namespace Explore
                     }
                 }
             };
+        }
+
+        private void OnPadScrollLoaded(object? sender, RoutedEventArgs e)
+        {
+            // DataGrid/TreeView 内部の ScrollViewer を取得
+            _filesScroll ??= FindDescendant<ScrollViewer>(FilesGrid);
+            _treeScroll ??= FindDescendant<ScrollViewer>(FolderTree);
+
+            // Win32 フック
+            _hwndSource = (HwndSource?)PresentationSource.FromVisual(this);
+            _hwndSource?.AddHook(WndProc);
+        }
+
+        private void OnPadScrollUnloaded(object? sender, RoutedEventArgs e)
+        {
+            if (_hwndSource != null)
+            {
+                _hwndSource.RemoveHook(WndProc);
+                _hwndSource = null;
+            }
+        }
+
+        // Shift + ホイールで横スクロール（補助）
+        private void OnPreviewMouseWheelForHorizontal(object sender, WpfInput.MouseWheelEventArgs e)
+        {
+            if (WpfInput.Keyboard.Modifiers != WpfInput.ModifierKeys.Shift) return;
+
+            var sv = (sender == (object)FilesGrid) ? _filesScroll :
+                     (sender == (object)FolderTree) ? _treeScroll : null;
+
+            if (sv != null)
+            {
+                sv.ScrollToHorizontalOffset(sv.HorizontalOffset + e.Delta);
+                e.Handled = true;
+            }
+        }
+
+        // Win32: 横ホイール（WM_MOUSEHWHEEL）で横スクロール
+        private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            const int WM_MOUSEHWHEEL = 0x020E;
+            if (msg == WM_MOUSEHWHEEL)
+            {
+                int delta = (short)((ulong)wParam >> 16);
+
+                // マウス直下の要素を見て、対象を決める
+                var over = WpfInput.Mouse.DirectlyOver as DependencyObject;
+                if (over != null)
+                {
+                    if (_filesScroll != null && IsDescendantOf(over, FilesGrid))
+                    {
+                        _filesScroll.ScrollToHorizontalOffset(_filesScroll.HorizontalOffset + delta);
+                        handled = true;
+                    }
+                    else if (_treeScroll != null && IsDescendantOf(over, FolderTree))
+                    {
+                        _treeScroll.ScrollToHorizontalOffset(_treeScroll.HorizontalOffset + delta);
+                        handled = true;
+                    }
+                }
+            }
+            return IntPtr.Zero;
+        }
+
+        private static bool IsDescendantOf(DependencyObject child, DependencyObject root)
+        {
+            var cur = child;
+            while (cur != null)
+            {
+                if (cur == root) return true;
+                cur = VisualTreeHelper.GetParent(cur);
+            }
+            return false;
+        }
+
+        private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+        {
+            if (root == null) return null;
+            int count = VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < count; i++)
+            {
+                var c = VisualTreeHelper.GetChild(root, i);
+                if (c is T t) return t;
+                var deep = FindDescendant<T>(c);
+                if (deep != null) return deep;
+            }
+            return null;
         }
 
         private void RebuildTreeItemsFromVmRoots()
@@ -525,7 +626,7 @@ namespace Explore
             cm.Items.Add(MI("開く", "OpenFile"));
             cm.Items.Add(MI("場所を開く", "OpenLocation"));
             cm.Items.Add(new Separator());
-            cm.Items.Add(MI("名前を変更", "Rename"));           // ← 追加
+            cm.Items.Add(MI("名前を変更", "Rename"));
             cm.Items.Add(new Separator());
             cm.Items.Add(MI("差分のみ Index（このファイル）", "ReindexFile"));
             cm.Items.Add(MI("DBレコード削除", "DeleteDbRecord"));
@@ -587,7 +688,7 @@ namespace Explore
             FilesGrid.SelectedItem = fr;
             FilesGrid.CurrentCell = new DataGridCellInfo(fr, nameCol);
 
-            // すこし遅延してから BeginEdit しないとフォーカスが合わない場合がある
+            // すこし遅延してから BeginEdit
             Dispatcher.BeginInvoke(new Action(() => FilesGrid.BeginEdit()));
         }
 
@@ -613,7 +714,7 @@ namespace Explore
             var oldName = _renameRestore.Value.oldName ?? fr.Name;
             _renameRestore = null;
 
-            // TextBox から新しい値を拾う（TwoWay でも念のため）
+            // TextBox から新しい値を拾う
             if (e.EditingElement is WpfTextBox tb) fr.Name = tb.Text?.Trim() ?? fr.Name;
 
             // 変更が無ければ終了
@@ -775,6 +876,7 @@ namespace Explore
             cm.Items.Add(MI("テキスト ドキュメント (.txt)", OnNewTextClick));
             cm.Items.Add(MI("Markdown (.md)", OnNewMarkdownClick));
             cm.Items.Add(MI("JSON (.json)", OnNewJsonClick));
+            // ↓ ここを修正
             cm.Items.Add(MI("CSV (.csv)", OnNewCsvClick));
             cm.Items.Add(new Separator());
             cm.Items.Add(MI("空の画像 (.png)", OnNewPngClick));
@@ -787,6 +889,7 @@ namespace Explore
             cm.PlacementTarget = fe;
             cm.IsOpen = true;
         }
+
 
         private async void OnImportFilesClick(object? sender, RoutedEventArgs e)
         {
