@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
 using System.Text.Json;
+using System.Text.Encodings.Web;   // ★ 追加：JSON エンコーダ指定
 using Explore.FileSystem;   // PathUtils
 using Explore.Indexing;     // IndexDatabase, FileKeyUtil
 
@@ -14,6 +15,12 @@ namespace Explore.Build
     public static class PlanBuilder
     {
         private const double DefaultThreshold = 0.55;
+
+        // ★ 追加：非 ASCII を \u エスケープしないためのオプション（タグの保存にのみ使用）
+        private static readonly JsonSerializerOptions s_TagsJsonOptions = new()
+        {
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
 
         public static async Task<BuildPlan> MakePlanAsync(
             IReadOnlyList<string> selectedTargets,
@@ -114,11 +121,28 @@ namespace Explore.Build
                 // DB: 提案 + summary/snippet/tags を保存
                 var key = FileKeyUtil.GetStableKey(full);
                 await db.UpsertClassificationSuggestionAsync(key, chosenRel, result.Confidence);
+                // ★未インデックスなら即時作成（ドライラン開始時点で行を確保）
+                await db.UpsertFileFromFsAsync(full, ct);
+
+                // ★ ここだけ変更：tags は \u にならない JSON で保存
+                string? tagsJson = null;
+                if (result.Tags != null && result.Tags.Length > 0)
+                {
+                    // null/空白を除去してから保存（既存動作は維持しつつ軽微なクリーンアップ）
+                    var tagsClean = result.Tags
+                        .Where(t => !string.IsNullOrWhiteSpace(t))
+                        .Select(t => t.Trim())
+                        .ToArray();
+
+                    if (tagsClean.Length > 0)
+                        tagsJson = JsonSerializer.Serialize(tagsClean, s_TagsJsonOptions);
+                }
+
                 await db.UpdateSummarySnippetTagsAsync(
                     key,
                     result.Summary ?? string.Empty,
                     MakeSnippet(text),
-                    (result.Tags != null && result.Tags.Length > 0) ? JsonSerializer.Serialize(result.Tags) : null,
+                    tagsJson,
                     ct
                 );
 
@@ -136,7 +160,7 @@ namespace Explore.Build
                     unresolved.Add(fi.FullName);
             }
 
-            // 作成すべきディレクトリ
+            // 作成すべきディレクトリ（ドライランでは作らない＝候補のみ）
             var createDirs = moves
                 .Select(m => Path.GetDirectoryName(m.DestFullPath)!)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -244,7 +268,7 @@ namespace Explore.Build
         // ★ドライランでディスクを汚さないため、ここではフォルダを作らない
         private static string GetAvailableName(string destDirAbs, string fileName)
         {
-            // Directory.CreateDirectory(destDirAbs);  // ←削除！
+            // Directory.CreateDirectory(destDirAbs);  // ←作らない！
 
             var name = Path.GetFileNameWithoutExtension(fileName);
             var ext = Path.GetExtension(fileName);

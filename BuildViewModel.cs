@@ -696,18 +696,22 @@ namespace Explore.Build
             }
             if (DryMoves <= 0 && moveCount > 0) DryMoves = moveCount;
 
-            // Unresolved / Errors
+            // Unresolved / Errors（★表示はフルパス→ファイル名へ）
             foreach (var u in TryGetEnumerable(Plan, "Unresolved", "Unclassified", "Skipped"))
             {
-                var path = FirstNonEmpty(GetString(u, "Path"), GetString(u, "FilePath"), GetString(u, "Source"), GetString(u, "Src"));
-                var reason = FirstNonEmpty(GetString(u, "Reason"), GetString(u, "Message"), GetString(u, "Why"));
-                DryUnresolvedList.Add(new DryIssue { Path = path ?? "(unknown)", Reason = reason ?? "" });
+                // u が string（フルパス）の場合にも対応
+                var path = (u as string) ?? FirstNonEmpty(GetString(u, "Path"), GetString(u, "FilePath"), GetString(u, "Source"), GetString(u, "Src"));
+                var reason = FirstNonEmpty(GetString(u, "Reason"), GetString(u, "Message"), GetString(u, "Why")) ?? "unclassified";
+                var nameOnly = FileNameOrUnknown(path);
+                DryUnresolvedList.Add(new DryIssue { Path = nameOnly, Reason = reason });
             }
             foreach (var e in TryGetEnumerable(Plan, "Errors", "Failures", "ErrorItems"))
             {
-                var path = FirstNonEmpty(GetString(e, "Path"), GetString(e, "FilePath"), GetString(e, "Source"), GetString(e, "Src"));
-                var reason = FirstNonEmpty(GetString(e, "Reason"), GetString(e, "Message"), GetString(e, "Why"));
-                DryErrorsList.Add(new DryIssue { Path = path ?? "(unknown)", Reason = reason ?? "" });
+                // エラー側も念のため string 直接を許容
+                var path = (e as string) ?? FirstNonEmpty(GetString(e, "Path"), GetString(e, "FilePath"), GetString(e, "Source"), GetString(e, "Src"));
+                var reason = FirstNonEmpty(GetString(e, "Reason"), GetString(e, "Message"), GetString(e, "Why")) ?? "";
+                var nameOnly = FileNameOrUnknown(path);
+                DryErrorsList.Add(new DryIssue { Path = nameOnly, Reason = reason });
             }
             if (DryUnresolved <= 0) DryUnresolved = DryUnresolvedList.Count;
             if (DryErrors <= 0) DryErrors = DryErrorsList.Count;
@@ -854,6 +858,18 @@ namespace Explore.Build
             if (p?.GetValue(obj) is long l) return (int)l;
             if (int.TryParse(p?.GetValue(obj)?.ToString(), out var j)) return j;
             return 0;
+        }
+
+        // ---- 表示用：フルパス→ファイル名（空なら "(unknown)"） ----
+        private static string FileNameOrUnknown(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return "(unknown)";
+            try
+            {
+                var name = Path.GetFileName(path);
+                return string.IsNullOrWhiteSpace(name) ? path : name;
+            }
+            catch { return "(unknown)"; }
         }
     }
 
