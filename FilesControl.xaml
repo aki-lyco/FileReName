@@ -390,7 +390,7 @@
 						  ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
 						  VirtualizingStackPanel.IsVirtualizing="True"
 						  VirtualizingPanel.ScrollUnit="Item"
-						  ScrollViewer.CanContentScroll="True"
+						  ScrollViewer.CanContentScroll="False"
 						  ScrollViewer.HorizontalScrollBarVisibility="Auto"
 						  ScrollViewer.PanningMode="Both">
 
@@ -427,7 +427,7 @@
 						  ScrollViewer.VerticalScrollBarVisibility="Auto"
 						  ScrollViewer.CanContentScroll="False"
 						  ScrollViewer.PanningMode="HorizontalOnly"
-						  ScrollViewer.IsDeferredScrollingEnabled="True"
+						  ScrollViewer.IsDeferredScrollingEnabled="False"
 						  VirtualizingPanel.ScrollUnit="Pixel">
 
 					<!-- ★ 仮想化を Recycling に（再利用で描画負荷を下げる） -->
