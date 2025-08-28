@@ -1,11 +1,9 @@
 ﻿using System;
+using System.Collections;
 using System.Linq;
 using System.Windows;
 using Explore.Build;
-using WinForms = System.Windows.Forms;   // FolderBrowserDialog
-using Win32 = Microsoft.Win32;          // OpenFileDialog
-using System.Collections;               // IList
-using System.Windows.Media;             // VisualTreeHelper
+using WinForms = System.Windows.Forms;
 
 namespace Explore
 {
@@ -18,13 +16,9 @@ namespace Explore
             InitializeComponent();
             DataContext = _vm;
 
-            // DI: UIサービス
+            // UI services
             _vm.PickFolder = PickFolder;
-            _vm.PickFilesOrFolder = PickFilesOrFolder;
             _vm.ShowMessage = (title, body) => System.Windows.MessageBox.Show(body, title);
-
-            // 既定選択
-            _vm.SelectedCategory = _vm.Root.Children.FirstOrDefault();
         }
 
         private string? PickFolder()
@@ -40,16 +34,10 @@ namespace Explore
             return null;
         }
 
-        private (string[] files, string? folder)? PickFilesOrFolder()
-        {
-            // 必要になったら実装
-            return null;
-        }
-
-        // SelectTargets: 追加ボタン（ファイル）
+        // == SelectTargets: 追加（ファイル） ==
         private void OnAddFilesClick(object sender, RoutedEventArgs e)
         {
-            var dlg = new Win32.OpenFileDialog
+            var dlg = new Microsoft.Win32.OpenFileDialog
             {
                 Multiselect = true,
                 Title = "分類対象ファイルを選択"
@@ -61,7 +49,7 @@ namespace Explore
             }
         }
 
-        // SelectTargets: 追加ボタン（フォルダ）
+        // == SelectTargets: 追加（フォルダ） ==
         private void OnAddFolderClick(object sender, RoutedEventArgs e)
         {
             var path = PickFolder();
@@ -74,70 +62,45 @@ namespace Explore
             _vm.SelectedCategory = e.NewValue as CategoryNode;
         }
 
-        private void OnTestDrop(object sender, System.Windows.DragEventArgs e)
-        {
-            // 右ペインからドロップエリアは削除したが、将来用にそのまま残す
-            if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop))
-            {
-                var paths = (string[])e.Data.GetData(System.Windows.DataFormats.FileDrop);
-                if (paths != null && paths.Length > 0)
-                {
-                    _vm.TestFilePath = paths[0];
-                }
-            }
-        }
-
-        // ===== ListBox（SelectedTargets 一覧）操作 =====
-
-        // sender から対象 ListBox を特定（WPF を明示）
+        // == ListBox 操作 ==
         private System.Windows.Controls.ListBox? ResolveListBox(object sender)
         {
             if (sender is System.Windows.Controls.ListBox lb) return lb;
 
-            if (sender is DependencyObject d)
+            if (sender is System.Windows.DependencyObject d)
             {
-                // コンテキストメニュー経由
                 if (d is System.Windows.Controls.MenuItem mi &&
                     mi.Parent is System.Windows.Controls.ContextMenu cm &&
-                    cm.PlacementTarget is System.Windows.Controls.ListBox lb0)
-                    return lb0;
+                    cm.PlacementTarget is System.Windows.Controls.ListBox plb)
+                    return plb;
 
-                // 親方向にたどる
                 var cur = d;
                 while (cur != null && cur is not System.Windows.Controls.ListBox)
-                    cur = VisualTreeHelper.GetParent(cur);
+                    cur = System.Windows.Media.VisualTreeHelper.GetParent(cur);
                 if (cur is System.Windows.Controls.ListBox lb1) return lb1;
             }
 
-            // フォーカス中の ListBox を優先
             if (SelectedList != null && SelectedList.IsKeyboardFocusWithin) return SelectedList;
             if (SelectedListDesign != null && SelectedListDesign.IsKeyboardFocusWithin) return SelectedListDesign;
-
-            // フォールバック
             return SelectedList ?? SelectedListDesign;
         }
 
-        // 選択を削除
         private void OnRemoveSelectedTargets(object sender, RoutedEventArgs e)
         {
             var list = ResolveListBox(sender);
-            if (list?.ItemsSource is not IList src) return;
-
-            var toRemove = new System.Collections.Generic.List<object>();
-            foreach (var it in list.SelectedItems)
-                toRemove.Add(it);
-            foreach (var it in toRemove)
-                src.Remove(it);
+            if (list?.ItemsSource is IList src)
+            {
+                var toRemove = list.SelectedItems.Cast<object>().ToList();
+                foreach (var it in toRemove) src.Remove(it);
+            }
         }
 
-        // 全クリア
         private void OnClearTargets(object sender, RoutedEventArgs e)
         {
             var list = ResolveListBox(sender);
             if (list?.ItemsSource is IList src) src.Clear();
         }
 
-        // Delete キーで「選択を削除」
         private void SelectedList_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
         {
             if (e.Key == System.Windows.Input.Key.Delete)
