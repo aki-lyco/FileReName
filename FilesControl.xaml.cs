@@ -19,6 +19,8 @@ using Explore.FileSystem;
 using Explore.Indexing;
 using Microsoft.Data.Sqlite;
 using System.Windows.Interop; // ★ 追加：HwndSource
+using Explore.UI; // UiSettings を参照
+
 
 // WPF型を明示するためのエイリアス
 using WpfMessageBox = System.Windows.MessageBox;
@@ -464,6 +466,49 @@ namespace Explore
             public event PropertyChangedEventHandler? PropertyChanged;
         }
 
+        private async Task AutoIndexIfSettingEnabledAsync(string path)
+        {
+            if (UiSettings.Instance?.AutoIndexOnSelect != true) return;
+            try
+            {
+                _indexCts?.Cancel();
+                _indexCts = new CancellationTokenSource();
+
+                await _db.EnsureCreatedAsync();
+
+                var recursive = UiSettings.Instance?.IncludeSubfolders == true;
+                var records = EnumerateRecordsAsync(path, recursive, _indexCts.Token);
+
+                await _db.BulkUpsertAsync(
+                    records,
+                    batchSize: 500,
+                    progress: null,
+                    ct: _indexCts.Token);
+
+                _fresh.InvalidateFreshnessCache(path);
+                await RefreshRowsFreshnessAsync(path);
+                await RecalcFreshnessPercentAsync(path);
+
+                // 行が後から追加された分を拾うため、少し待ってもう一度
+                await Task.Delay(300);
+                await RefreshRowsFreshnessAsync(path);
+                await RecalcFreshnessPercentAsync(path);
+
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(ex.Message, "Auto Index Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _fresh.InvalidateFreshnessCache(path);
+                _indexCts?.Dispose();
+                _indexCts = null;
+            }
+        }
+
         // フォルダ選択/展開
         private async void OnFolderSelected(object? sender, RoutedPropertyChangedEventArgs<object> e)
         {
@@ -471,12 +516,14 @@ namespace Explore
             {
                 SessionExplorerState.LastSelectedPath = node.FullPath;
                 await NavigateAndFillAsync(node.FullPath);
+                await AutoIndexIfSettingEnabledAsync(node.FullPath);     // ★ 追加
                 return;
             }
             if (e.NewValue is QuickAccessItem qa && Directory.Exists(qa.FullPath))
             {
                 SessionExplorerState.LastSelectedPath = qa.FullPath;
                 await NavigateAndFillAsync(qa.FullPath);
+                await AutoIndexIfSettingEnabledAsync(qa.FullPath);       // ★ 追加
             }
         }
 
@@ -589,17 +636,20 @@ namespace Explore
 
             // 鮮度計算：先に無効化→徐々に埋める
             _fresh.InvalidateFreshnessCache(path);
-            _ = Task.Run(async () =>
+            var autoIdx = Explore.UI.UiSettings.Instance?.AutoIndexOnSelect == true;
+            if (!autoIdx)
             {
-                try
+                _ = Task.Run(async () =>
                 {
-                    // 最初の描画が落ち着いた頃に開始
-                    await Task.Delay(50, ct);
-                    await RefreshRowsFreshnessAsync(path);
-                    await RecalcFreshnessPercentAsync(path);
-                }
-                catch { }
-            }, ct);
+                    try
+                    {
+                        await Task.Delay(50, ct);
+                        await RefreshRowsFreshnessAsync(path);
+                        await RecalcFreshnessPercentAsync(path);
+                    }
+                    catch { }
+                }, ct);
+            }
         }
 
 
@@ -634,7 +684,7 @@ namespace Explore
 
                 _fresh.InvalidateFreshnessCache(root!);
                 await RefreshRowsFreshnessAsync(root!);
-                _ = RecalcFreshnessPercentAsync(root!);
+                await RecalcFreshnessPercentAsync(root!);
             }
             catch (OperationCanceledException)
             {
@@ -1336,21 +1386,24 @@ namespace Explore
             return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
         }
 
+        private readonly System.Threading.SemaphoreSlim _freshSem = new(1, 1);
+
         private async Task RefreshRowsFreshnessAsync(string scopePath)
         {
-            _freshCts?.Cancel();
-            _freshCts = new CancellationTokenSource();
-
+            await _freshSem.WaitAsync();
             try
             {
                 foreach (var row in Rows)
                 {
-                    var st = await _fresh.GetFreshStateByPathAsync(row.FullPath, _freshCts.Token);
+                    var st = await _fresh.GetFreshStateByPathAsync(row.FullPath, CancellationToken.None);
                     row.FreshState = st;
                     if ((uint)Environment.TickCount % 256 == 0) await Task.Yield();
                 }
             }
-            catch (OperationCanceledException) { }
+            finally
+            {
+                _freshSem.Release();
+            }
         }
 
         private async Task RecalcFreshnessPercentAsync(string scopePath)
@@ -1847,7 +1900,10 @@ VALUES($k,$o,$n,'move',NULL,$t)";
         private async void OnBreadcrumbClick(object sender, RoutedEventArgs e)
         {
             if (sender is WpfButton b && b.Tag is string p && Directory.Exists(p))
+            {
                 await NavigateAndFillAsync(p);
+                await AutoIndexIfSettingEnabledAsync(p); // ★ 追加
+            }
         }
 
         // ヒットテスト系ユーティリティ
