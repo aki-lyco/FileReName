@@ -1,26 +1,32 @@
 ﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-	<!-- テーマ色（既存） -->
+	<!-- 既存テーマ色 -->
 	<Color x:Key="ThemeColor">#FF197FFF</Color>
 	<SolidColorBrush x:Key="ThemeBrush" Color="{StaticResource ThemeColor}"/>
 
-	<!-- 重要: RangeBase 派生コントロールの既定を安全化
-         ※ Value はスタイルでバインド/固定しない（画面側で必要に応じて設定）
-         ※ これで XAML パース時の 'RangeBase.Value' 例外を回避できます -->
-
-	<!-- ProgressBar の既定（最小/最大だけ定義） -->
+	<!-- ProgressBar 既定 -->
 	<Style TargetType="ProgressBar">
 		<Setter Property="Minimum" Value="0"/>
 		<Setter Property="Maximum" Value="100"/>
-		<!-- 見た目の既定が必要なら Height 等をここに追加してOK -->
-		<!-- <Setter Property="Height" Value="14"/> -->
 	</Style>
 
-	<!-- Slider の既定（同様に Value は触らない） -->
+	<!-- 追加：ホバー用ブラシ（ライト） -->
+	<SolidColorBrush x:Key="Row.HoverBg"     Color="#F3F8FF"/>
+	<SolidColorBrush x:Key="Row.HoverBorder" Color="#CDE3FF"/>
+	<SolidColorBrush x:Key="Tree.HoverBg"    Color="#F5F9FF"/>
+
+	<!-- Slider 既定 -->
 	<Style TargetType="Slider">
 		<Setter Property="Minimum" Value="0"/>
 		<Setter Property="Maximum" Value="100"/>
 	</Style>
 
+	<!-- ▼ 高解像度アイコン（Light） -->
+	<!--   pack リソースとして読み込む。DecodePixelWidth は余裕を持って 80 にし、
+         実表示 20px にダウンサンプル（FilesControl 側は HighQuality スケーリング） -->
+	<BitmapImage x:Key="Icon.DbIndex.Add"
+                 UriSource="pack://application:,,,/Assets/Icons/big_db_index_add_light.png.png"
+                 DecodePixelWidth="128"
+                 CacheOption="OnLoad"/>
 </ResourceDictionary>

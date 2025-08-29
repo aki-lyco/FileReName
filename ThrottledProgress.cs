@@ -4,71 +4,43 @@ using System.Windows.Threading;
 namespace Explore
 {
     /// <summary>
-    /// IProgress を間引いて UI 更新を最大 N ms に 1 回へ。
+    /// IProgress&lt;T&gt; の通知を DispatcherTimer で間引いて UI スレッドに投げるヘルパ。
+    /// Report は高頻度で呼ばれても OK。最後の値だけ interval 毎に UI に反映します。
     /// </summary>
-    internal sealed class ThrottledProgress<T> : IProgress<T>, IDisposable
+    public sealed class ThrottledProgress<T> : IProgress<T>, IDisposable
     {
-        private readonly Dispatcher _dispatcher;
-        private readonly TimeSpan _interval;
-        private readonly Action<T> _onProgress;
         private readonly DispatcherTimer _timer;
-        private readonly object _gate = new();
+        private readonly Action<T> _onTick;
+        private bool _hasValue;
+        private T _latest = default!;
+        private bool _disposed;
 
-        private T _last = default!;
-        private bool _dirty;
-        private int _idleTicks;
-
-        public ThrottledProgress(Dispatcher dispatcher, TimeSpan interval, Action<T> onProgress)
+        public ThrottledProgress(Dispatcher dispatcher, TimeSpan interval, Action<T> onTick)
         {
-            _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
-            _interval = interval;
-            _onProgress = onProgress ?? throw new ArgumentNullException(nameof(onProgress));
-
-            _timer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+            _onTick = onTick ?? throw new ArgumentNullException(nameof(onTick));
+            _timer = new DispatcherTimer(interval, DispatcherPriority.Background, (s, e) =>
             {
-                Interval = _interval
-            };
-            _timer.Tick += OnTick;
+                if (_hasValue)
+                {
+                    _hasValue = false;
+                    _onTick(_latest);
+                }
+            }, dispatcher);
+            _timer.Start();
         }
 
         public void Report(T value)
         {
-            lock (_gate)
-            {
-                _last = value;
-                _dirty = true;
-                _idleTicks = 0;
-                if (!_timer.IsEnabled) _timer.Start();
-            }
-        }
-
-        private void OnTick(object? sender, EventArgs e)
-        {
-            T snapshot = default!;
-            bool hasChange;
-            lock (_gate)
-            {
-                hasChange = _dirty;
-                if (hasChange) snapshot = _last;
-                _dirty = false;
-
-                if (!hasChange)
-                {
-                    _idleTicks++;
-                    if (_idleTicks >= 2)
-                    {
-                        _timer.Stop();
-                        _idleTicks = 0;
-                    }
-                }
-            }
-            if (hasChange) _onProgress(snapshot);
+            if (_disposed) return;
+            _latest = value;
+            _hasValue = true;
         }
 
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
             _timer.Stop();
-            _timer.Tick -= OnTick;
         }
     }
 }

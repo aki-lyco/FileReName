@@ -1,87 +1,501 @@
 ﻿<UserControl x:Class="Explore.FilesControl"
-             x:Name="root"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:local="clr-namespace:Explore"
              xmlns:fs="clr-namespace:Explore.FileSystem"
              xmlns:conv="clr-namespace:FileReName.Converters"
+             xmlns:icon="clr-namespace:Explore.Converters"
              mc:Ignorable="d"
              d:DesignHeight="600" d:DesignWidth="1000">
 
 	<UserControl.Resources>
-		<conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
-		<Style x:Key="GridHeader" TargetType="GridViewColumnHeader">
-			<Setter Property="HorizontalContentAlignment" Value="Left"/>
-			<Setter Property="Padding" Value="4,0,4,0"/>
+		<!-- 先に宣言：拡張子/パス→シェルアイコン（ファイル一覧で使用） -->
+		<icon:PathToIconConverter x:Key="PathToIcon"/>
+
+		<!-- パンくず -->
+		<local:PathToBreadcrumbConverter x:Key="PathToBreadcrumb" />
+
+		<!-- ========= DataGrid（右側）選択スタイル：薄青＋黒枠、文字は黒 ========= -->
+		<Style TargetType="{x:Type DataGridRow}">
+			<Setter Property="Padding" Value="10,2"/>
+			<Setter Property="BorderBrush" Value="#EEE"/>
+			<Setter Property="BorderThickness" Value="0,0,0,1"/>
+			<Setter Property="Background" Value="Transparent"/>
+			<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+			<Style.Triggers>
+				<Trigger Property="IsSelected" Value="True">
+					<Setter Property="Background" Value="#E6F1FF"/>
+					<Setter Property="BorderBrush" Value="#000000"/>
+					<Setter Property="BorderThickness" Value="1"/>
+					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</Trigger>
+
+				<!-- ★追加：未選択時のホバー色 -->
+				<MultiTrigger>
+					<MultiTrigger.Conditions>
+						<Condition Property="IsMouseOver" Value="True"/>
+						<Condition Property="IsSelected"   Value="False"/>
+					</MultiTrigger.Conditions>
+					<Setter Property="Background"     Value="{DynamicResource Row.HoverBg}"/>
+					<Setter Property="BorderBrush"    Value="{DynamicResource Row.HoverBorder}"/>
+					<Setter Property="BorderThickness" Value="1"/>
+				</MultiTrigger>
+
+				<Trigger Property="Selector.IsSelectionActive" Value="False">
+					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</Trigger>
+			</Style.Triggers>
 		</Style>
+
+		<Style TargetType="{x:Type DataGridCell}">
+			<Setter Property="Background" Value="Transparent"/>
+			<Setter Property="BorderThickness" Value="0"/>
+			<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+			<Style.Triggers>
+				<Trigger Property="IsSelected" Value="True">
+					<Setter Property="Background" Value="Transparent"/>
+					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</Trigger>
+				<Trigger Property="Selector.IsSelectionActive" Value="False">
+					<Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</Trigger>
+			</Style.Triggers>
+		</Style>
+		<!-- ========= /DataGrid 選択スタイル ========= -->
+
+		<!-- ツリーの見た目（コンテナ側の基本設定） -->
+		<Style TargetType="{x:Type TreeViewItem}" x:Key="FolderTreeItemStyle">
+			<Setter Property="Padding" Value="6,2"/>
+			<Setter Property="IsExpanded" Value="False"/>
+			<Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+		</Style>
+
+		<!-- ========= TreeView ヘッダー ========= -->
+		<!-- クイックアクセス：グループ -->
+		<HierarchicalDataTemplate DataType="{x:Type local:QuickAccessGroup}" ItemsSource="{Binding Items}">
+			<Border x:Name="SelBd" Background="Transparent" BorderBrush="Transparent"
+                    BorderThickness="1" CornerRadius="2" Padding="2">
+				<StackPanel Orientation="Horizontal">
+					<TextBlock Text="📌" Margin="0,0,6,0"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+					<TextBlock Text="{Binding Name}"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</StackPanel>
+			</Border>
+			<HierarchicalDataTemplate.Triggers>
+				<DataTrigger Value="True"
+                             Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}">
+					<Setter TargetName="SelBd" Property="Background" Value="#E6F1FF"/>
+					<Setter TargetName="SelBd" Property="BorderBrush"   Value="#000000"/>
+				</DataTrigger>
+
+				<!-- ★追加：未選択ホバー -->
+				<MultiDataTrigger>
+					<MultiDataTrigger.Conditions>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsMouseOver}" Value="True"/>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}"   Value="False"/>
+					</MultiDataTrigger.Conditions>
+					<Setter TargetName="SelBd" Property="Background"  Value="{DynamicResource Tree.HoverBg}"/>
+					<Setter TargetName="SelBd" Property="BorderBrush" Value="#D7E6FF"/>
+				</MultiDataTrigger>
+			</HierarchicalDataTemplate.Triggers>
+		</HierarchicalDataTemplate>
+
+		<!-- クイックアクセス：項目 -->
+		<DataTemplate DataType="{x:Type local:QuickAccessItem}">
+			<Border x:Name="SelBd" Background="Transparent" BorderBrush="Transparent"
+                    BorderThickness="1" CornerRadius="2" Padding="2">
+				<StackPanel Orientation="Horizontal">
+					<TextBlock Text="⭐" Margin="0,0,6,0"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+					<TextBlock Text="{Binding Name}"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</StackPanel>
+			</Border>
+			<DataTemplate.Triggers>
+				<DataTrigger Value="True"
+                             Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}">
+					<Setter TargetName="SelBd" Property="Background" Value="#E6F1FF"/>
+					<Setter TargetName="SelBd" Property="BorderBrush"   Value="#000000"/>
+				</DataTrigger>
+
+				<!-- ★追加：未選択ホバー -->
+				<MultiDataTrigger>
+					<MultiDataTrigger.Conditions>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsMouseOver}" Value="True"/>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}"   Value="False"/>
+					</MultiDataTrigger.Conditions>
+					<Setter TargetName="SelBd" Property="Background"  Value="{DynamicResource Tree.HoverBg}"/>
+					<Setter TargetName="SelBd" Property="BorderBrush" Value="#D7E6FF"/>
+				</MultiDataTrigger>
+			</DataTemplate.Triggers>
+		</DataTemplate>
+
+		<!-- 通常フォルダ -->
+		<HierarchicalDataTemplate DataType="{x:Type fs:FolderNode}" ItemsSource="{Binding Children}">
+			<Border x:Name="SelBd" Background="Transparent" BorderBrush="Transparent"
+                    BorderThickness="1" CornerRadius="2" Padding="2">
+				<StackPanel Orientation="Horizontal">
+					<TextBlock Text="📁" Margin="0,0,6,0"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+					<TextBlock Text="{Binding Name}"
+                               Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+				</StackPanel>
+			</Border>
+			<HierarchicalDataTemplate.Triggers>
+				<DataTrigger Value="True"
+                             Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}">
+					<Setter TargetName="SelBd" Property="Background" Value="#E6F1FF"/>
+					<Setter TargetName="SelBd" Property="BorderBrush"   Value="#000000"/>
+				</DataTrigger>
+
+				<!-- ★追加：未選択ホバー -->
+				<MultiDataTrigger>
+					<MultiDataTrigger.Conditions>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsMouseOver}" Value="True"/>
+						<Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}"   Value="False"/>
+					</MultiDataTrigger.Conditions>
+					<Setter TargetName="SelBd" Property="Background"  Value="{DynamicResource Tree.HoverBg}"/>
+					<Setter TargetName="SelBd" Property="BorderBrush" Value="#D7E6FF"/>
+				</MultiDataTrigger>
+			</HierarchicalDataTemplate.Triggers>
+		</HierarchicalDataTemplate>
+		<!-- ========= /TreeView 選択スタイル ========= -->
+
+		<!-- 鮮度表示用 -->
+		<conv:FreshStateToBrushConverter x:Key="FreshBrush"/>
+		<conv:FreshStateToTextConverter  x:Key="FreshText"/>
+		<conv:FreshStateToTipConverter   x:Key="FreshTip"/>
+
+		<!-- ===== Toolbar modern styles ===== -->
+		<SolidColorBrush x:Key="Tb.Fg" Color="#222" />
+		<SolidColorBrush x:Key="Tb.Bg" Color="#F6F7F9" />
+		<SolidColorBrush x:Key="Tb.BgHover" Color="#EEF1F6" />
+		<SolidColorBrush x:Key="Tb.BgPressed" Color="#E5E9F1" />
+		<SolidColorBrush x:Key="Tb.Border" Color="#D0D5DD" />
+		<SolidColorBrush x:Key="Tb.BorderHover" Color="#B8BEC9" />
+		<SolidColorBrush x:Key="Tb.PrimaryBg" Color="#E7F0FF" />
+		<SolidColorBrush x:Key="Tb.PrimaryBorder" Color="#3B82F6" />
+		<SolidColorBrush x:Key="Tb.PrimaryFg" Color="#0B5ED7" />
+
+		<Style x:Key="ToolbarButton" TargetType="Button">
+			<Setter Property="Foreground" Value="{StaticResource Tb.Fg}"/>
+			<Setter Property="Background" Value="{StaticResource Tb.Bg}"/>
+			<Setter Property="BorderBrush" Value="{StaticResource Tb.Border}"/>
+			<Setter Property="BorderThickness" Value="1"/>
+			<Setter Property="Padding" Value="12,6"/>
+			<Setter Property="FontSize" Value="13"/>
+			<Setter Property="FontWeight" Value="SemiBold"/>
+			<Setter Property="MinWidth" Value="96"/>
+			<Setter Property="Height" Value="32"/>
+			<Setter Property="SnapsToDevicePixels" Value="True"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="Button">
+						<Border x:Name="bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+							<ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="bd" Property="Background" Value="{StaticResource Tb.BgHover}"/>
+								<Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Tb.BorderHover}"/>
+							</Trigger>
+							<Trigger Property="IsPressed" Value="True">
+								<Setter TargetName="bd" Property="Background" Value="{StaticResource Tb.BgPressed}"/>
+							</Trigger>
+							<Trigger Property="IsEnabled" Value="False">
+								<Setter Property="Opacity" Value="0.5"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+		<Style x:Key="ToolbarIconButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+			<Setter Property="MinWidth" Value="40"/>
+			<Setter Property="Width" Value="40"/>
+			<Setter Property="Padding" Value="0"/>
+		</Style>
+
+		<Style x:Key="ToolbarToggle" TargetType="ToggleButton" BasedOn="{StaticResource ToolbarButton}">
+			<Setter Property="MinWidth" Value="0"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="ToggleButton">
+						<Border x:Name="bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+							<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+						</Border>
+						<ControlTemplate.Triggers>
+							<Trigger Property="IsChecked" Value="True">
+								<Setter TargetName="bd" Property="Background" Value="{StaticResource Tb.PrimaryBg}"/>
+								<Setter Property="Foreground" Value="{StaticResource Tb.PrimaryFg}"/>
+								<Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Tb.PrimaryBorder}"/>
+							</Trigger>
+							<Trigger Property="IsMouseOver" Value="True">
+								<Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Tb.BorderHover}"/>
+							</Trigger>
+							<Trigger Property="IsEnabled" Value="False">
+								<Setter Property="Opacity" Value="0.5"/>
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+		<!-- ツールバー用の小さな黒ツールチップ -->
+		<Style x:Key="ToolbarTooltip" TargetType="ToolTip">
+			<Setter Property="Background" Value="#2B2B2B"/>
+			<Setter Property="Foreground" Value="White"/>
+			<Setter Property="Padding" Value="8,4"/>
+			<Setter Property="FontSize" Value="12"/>
+			<Setter Property="HasDropShadow" Value="True"/>
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="ToolTip">
+						<Border Background="{TemplateBinding Background}"
+                                CornerRadius="6"
+                                SnapsToDevicePixels="True">
+							<ContentPresenter Margin="{TemplateBinding Padding}"
+                                              RecognizesAccessKey="True"/>
+						</Border>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+		<!-- ===== /Toolbar modern styles ===== -->
 	</UserControl.Resources>
 
 	<Grid>
 		<Grid.RowDefinitions>
 			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="Auto"/>
 			<RowDefinition Height="*"/>
 		</Grid.RowDefinitions>
 
-		<!-- 上部：進捗（Toolbar/StatusBarは使わない） -->
-		<Border Grid.Row="0" Padding="8,6" BorderBrush="#DDD" BorderThickness="0,0,0,1">
-			<StackPanel Orientation="Vertical">
-				<ProgressBar Minimum="0" Maximum="100" Height="10"
-							 Value="{Binding IndexPercent, ElementName=root, Mode=OneWay}"
-							 Visibility="{Binding IsIndexing, ElementName=root, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"/>
-				<StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-					<TextBlock Text="{Binding IndexStatusText, ElementName=root, Mode=OneWay}"/>
-					<TextBlock Text="  •  " Margin="2,0"/>
-					<TextBlock Text="{Binding IndexedCountText, ElementName=root, Mode=OneWay}" Foreground="Gray"/>
-				</StackPanel>
+		<!-- ツールバー -->
+		<Border Grid.Row="0" Background="#F6F7F9" Padding="8,8" BorderBrush="#E6E6E6" BorderThickness="0,0,0,1">
+			<StackPanel Orientation="Horizontal">
+				<Button x:Name="BtnNewCreate" Content="新規作成" Margin="0,0,8,0" Style="{StaticResource ToolbarButton}"/>
+				<Separator Width="8"/>
+
+				<!-- ▼ このフォルダを同期 -->
+				<Button x:Name="BtnIndex"
+                        Style="{StaticResource ToolbarIconButton}"
+                        Width="44" Height="44"
+                        Margin="0,0,8,0"
+                        ToolTipService.InitialShowDelay="150"
+                        ToolTipService.ShowDuration="4000"
+                        ToolTipService.Placement="Top"
+                        AutomationProperties.Name="DBに追加">
+					<Button.ToolTip>
+						<ToolTip Style="{StaticResource ToolbarTooltip}" Content="DBに追加"/>
+					</Button.ToolTip>
+					<Image Width="32" Height="32"
+                           Source="{DynamicResource Icon.DbIndex.Add}"
+                           SnapsToDevicePixels="True"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+				</Button>
+
+				<Button x:Name="BtnIndexDiff" Content="差分のみIndex" Margin="0,0,8,0" Style="{StaticResource ToolbarButton}"/>
+
+				<!-- ゴミ箱へ移動 -->
+				<Button x:Name="BtnRecycle" Style="{StaticResource ToolbarIconButton}"
+                        Margin="0,0,8,0" ToolTip="ゴミ箱へ移動" AutomationProperties.Name="ゴミ箱へ移動">
+					<TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74D;" FontSize="16"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+				</Button>
+
+				<TextBlock Text="{Binding IndexStatusText}" Margin="16,0,0,0" VerticalAlignment="Center" Foreground="#666"/>
+				<TextBlock Text="{Binding FreshnessPercent, StringFormat=鮮度 {0:F0}%}" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="#666"/>
 			</StackPanel>
 		</Border>
 
-		<!-- 下部：2ペイン -->
-		<Grid Grid.Row="1">
+		<!-- パンくず + ピン -->
+		<Border Grid.Row="1" Background="#FAFAFA" Padding="8,6" BorderBrush="#E6E6E6" BorderThickness="0,0,0,1" Margin="0,0,0,6">
+			<DockPanel LastChildFill="False">
+				<ScrollViewer DockPanel.Dock="Left" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+					<ItemsControl ItemsSource="{Binding VM.CurrentPath, Converter={StaticResource PathToBreadcrumb}}">
+						<ItemsControl.ItemsPanel>
+							<ItemsPanelTemplate>
+								<StackPanel Orientation="Horizontal"/>
+							</ItemsPanelTemplate>
+						</ItemsControl.ItemsPanel>
+						<ItemsControl.ItemTemplate>
+							<DataTemplate DataType="{x:Type local:BreadcrumbItem}">
+								<StackPanel Orientation="Horizontal">
+									<Button Padding="10,4" Margin="0,0,2,0"
+                                            Background="Transparent" BorderBrush="Transparent"
+                                            Content="{Binding Name}"
+                                            Tag="{Binding FullPath}"
+                                            Click="OnBreadcrumbClick" />
+									<TextBlock x:Name="Chevron" Text="›" Foreground="#9AA0A6"
+                                               VerticalAlignment="Center" Margin="2,0"/>
+								</StackPanel>
+								<DataTemplate.Triggers>
+									<DataTrigger Binding="{Binding IsLast}" Value="True">
+										<Setter TargetName="Chevron" Property="UIElement.Visibility" Value="Collapsed"/>
+									</DataTrigger>
+								</DataTemplate.Triggers>
+							</DataTemplate>
+						</ItemsControl.ItemTemplate>
+					</ItemsControl>
+				</ScrollViewer>
+
+				<!-- ★ ピン -->
+				<Button x:Name="BtnPin" DockPanel.Dock="Right" Margin="8,0,0,0" Padding="8,2"
+                        ToolTip="クイックアクセスにピン留め / 解除"
+                        Background="Transparent" BorderBrush="#DDD"
+                        Click="OnPinButtonClick">
+					<Button.Style>
+						<Style TargetType="Button">
+							<Setter Property="Content" Value="☆"/>
+							<Style.Triggers>
+								<DataTrigger Binding="{Binding IsCurrentPinned}" Value="True">
+									<Setter Property="Content" Value="★"/>
+								</DataTrigger>
+							</Style.Triggers>
+						</Style>
+					</Button.Style>
+				</Button>
+			</DockPanel>
+		</Border>
+
+		<!-- 本文 -->
+		<Grid Grid.Row="2">
 			<Grid.ColumnDefinitions>
-				<ColumnDefinition Width="300"/>
-				<ColumnDefinition Width="5"/>
+				<ColumnDefinition Width="280"/>
+				<ColumnDefinition Width="4"/>
 				<ColumnDefinition Width="*"/>
 			</Grid.ColumnDefinitions>
 
-			<!-- 左：フォルダツリー -->
-			<Border Grid.Column="0" BorderBrush="#DDD" BorderThickness="0,0,1,0">
-				<TreeView x:Name="TreeViewRoot"
-						  ItemsSource="{Binding VM.Roots, ElementName=root}"
-						  SelectedItemChanged="OnFolderSelected"
-						  ScrollViewer.CanContentScroll="True">
-					<TreeView.ItemContainerStyle>
-						<Style TargetType="TreeViewItem">
-							<EventSetter Event="Expanded" Handler="OnNodeExpanded"/>
-						</Style>
-					</TreeView.ItemContainerStyle>
+			<!-- フォルダツリー -->
+			<Border Grid.Column="0" BorderBrush="#E6E6E6" BorderThickness="0,0,1,0">
+				<!-- ★ 横スクロールバー＆パニングを有効化（仮想化は維持） -->
+				<TreeView x:Name="FolderTree"
+						  ItemsSource="{Binding TreeItems}"
+						  ItemContainerStyle="{StaticResource FolderTreeItemStyle}"
+						  VirtualizingStackPanel.IsVirtualizing="True"
+						  VirtualizingPanel.ScrollUnit="Item"
+						  ScrollViewer.CanContentScroll="False"
+						  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+						  ScrollViewer.PanningMode="Both">
+
+					<!-- 既定の濃い青ハイライトを無効化（TreeView 内スコープ） -->
 					<TreeView.Resources>
-						<HierarchicalDataTemplate DataType="{x:Type fs:FolderNode}"
-												  ItemsSource="{Binding Children}">
-							<TextBlock Text="{Binding Name}"/>
-						</HierarchicalDataTemplate>
+						<SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="Transparent"/>
+						<SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="Transparent"/>
+						<SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#000000"/>
 					</TreeView.Resources>
 				</TreeView>
 			</Border>
 
 			<!-- 仕切り -->
-			<GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#EEE"/>
+			<GridSplitter Grid.Column="1"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                          Background="#F0F0F0" Width="4" ResizeBehavior="PreviousAndNext" />
 
-			<!-- 右：ファイル一覧（FileItem に合わせた列名） -->
-			<Border Grid.Column="2" BorderBrush="#DDD" BorderThickness="0">
-				<ListView ItemsSource="{Binding VM.Files, ElementName=root}">
-					<ListView.View>
-						<GridView AllowsColumnReorder="True">
-							<GridViewColumn Header="名前"      DisplayMemberBinding="{Binding Name}"           Width="260"/>
-							<GridViewColumn Header="拡張子"    DisplayMemberBinding="{Binding Extension}"      Width="100"/>
-							<GridViewColumn Header="サイズ"    DisplayMemberBinding="{Binding Size}"           Width="120"/>
-							<GridViewColumn Header="更新日時"  DisplayMemberBinding="{Binding LastWriteTime}"  Width="180"/>
-							<GridViewColumn Header="パス"      DisplayMemberBinding="{Binding FullPath}"       Width="400"/>
-						</GridView>
-					</ListView.View>
-				</ListView>
-			</Border>
+			<!-- ファイル一覧 -->
+			<Grid Grid.Column="2">
+				<!-- ★ 横スクロールを有効化し、列幅は固定。隠れた分は横スクロールで表示 -->
+				<DataGrid x:Name="FilesGrid"
+						  ItemsSource="{Binding Rows}"
+						  AutoGenerateColumns="False"
+						  HeadersVisibility="Column"
+						  GridLinesVisibility="None"
+						  CanUserAddRows="False"
+						  SelectionMode="Extended"
+						  SelectionUnit="FullRow"
+						  EnableRowVirtualization="True"
+						  EnableColumnVirtualization="True"
+						  RowHeaderWidth="0"
+						  IsReadOnly="True"
+						  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+						  ScrollViewer.VerticalScrollBarVisibility="Auto"
+						  ScrollViewer.CanContentScroll="False"
+						  ScrollViewer.PanningMode="HorizontalOnly"
+						  ScrollViewer.IsDeferredScrollingEnabled="False"
+						  VirtualizingPanel.ScrollUnit="Pixel">
+
+					<!-- ★ 仮想化を Recycling に（再利用で描画負荷を下げる） -->
+					<DataGrid.ItemsPanel>
+						<ItemsPanelTemplate>
+							<VirtualizingStackPanel
+								VirtualizationMode="Recycling"
+								IsVirtualizing="True"
+								VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+								VirtualizingPanel.ScrollUnit="Pixel"/>
+						</ItemsPanelTemplate>
+					</DataGrid.ItemsPanel>
+
+					<DataGrid.Columns>
+						<!-- 左端チェック列 -->
+						<DataGridTemplateColumn Width="40" IsReadOnly="False">
+							<DataGridTemplateColumn.HeaderTemplate>
+								<DataTemplate>
+									<CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
+											  Click="OnHeaderCheckAllClick"/>
+								</DataTemplate>
+							</DataGridTemplateColumn.HeaderTemplate>
+							<DataGridTemplateColumn.CellTemplate>
+								<DataTemplate>
+									<CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"
+											  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+								</DataTemplate>
+							</DataGridTemplateColumn.CellTemplate>
+						</DataGridTemplateColumn>
+
+						<!-- 種類アイコン列 -->
+						<DataGridTemplateColumn Width="36" IsReadOnly="True">
+							<DataGridTemplateColumn.CellTemplate>
+								<DataTemplate>
+									<Image Width="16" Height="16" Margin="2"
+										   Source="{Binding Extension, Converter={StaticResource PathToIcon}}"/>
+								</DataTemplate>
+							</DataGridTemplateColumn.CellTemplate>
+						</DataGridTemplateColumn>
+
+						<!-- ★ 固定幅 -->
+						<DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="320" />
+						<DataGridTextColumn Header="拡張子" Binding="{Binding Extension}" Width="120"/>
+						<DataGridTextColumn Header="サイズ" Binding="{Binding Size, StringFormat={}{0:N0}}" Width="140"/>
+
+						<!-- 鮮度 -->
+						<DataGridTemplateColumn Header="鮮度" Width="110" IsReadOnly="True">
+							<DataGridTemplateColumn.CellTemplate>
+								<DataTemplate>
+									<StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+												ToolTip="{Binding FreshState, Converter={StaticResource FreshTip}}">
+										<Ellipse Width="8" Height="8"
+												 Fill="{Binding FreshState, Converter={StaticResource FreshBrush}}"
+												 Margin="0,0,6,0"/>
+										<TextBlock Text="{Binding FreshState, Converter={StaticResource FreshText}}"
+												   Foreground="#555"
+												   VerticalAlignment="Center"/>
+									</StackPanel>
+								</DataTemplate>
+							</DataGridTemplateColumn.CellTemplate>
+						</DataGridTemplateColumn>
+
+						<DataGridTextColumn Header="更新日時"
+											Binding="{Binding LastWriteTime, StringFormat={}{0:yyyy-MM-dd HH:mm}}"
+											Width="180"/>
+					</DataGrid.Columns>
+				</DataGrid>
+			</Grid>
 		</Grid>
 	</Grid>
 </UserControl>

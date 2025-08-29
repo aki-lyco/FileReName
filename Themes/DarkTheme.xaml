@@ -1,0 +1,31 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+	<!-- 既存テーマ色（ダーク） -->
+	<Color x:Key="ThemeColor">#FF4CC2FF</Color>
+	<SolidColorBrush x:Key="ThemeBrush" Color="{StaticResource ThemeColor}"/>
+
+	<!-- ProgressBar 既定 -->
+	<Style TargetType="ProgressBar">
+		<Setter Property="Minimum" Value="0"/>
+		<Setter Property="Maximum" Value="100"/>
+	</Style>
+
+	<!-- Slider 既定 -->
+	<Style TargetType="Slider">
+		<Setter Property="Minimum" Value="0"/>
+		<Setter Property="Maximum" Value="100"/>
+	</Style>
+
+	<!-- 追加：ホバー用ブラシ（ダーク） -->
+	<SolidColorBrush x:Key="Row.HoverBg"     Color="#223040"/>
+	<SolidColorBrush x:Key="Row.HoverBorder" Color="#2F4664"/>
+	<SolidColorBrush x:Key="Tree.HoverBg"    Color="#243242"/>
+
+
+	<!-- ▼ 高解像度アイコン（Dark） -->
+	<BitmapImage x:Key="Icon.DbIndex.Add"
+                 UriSource="pack://application:,,,/Assets/Icons/big_db_index_add_dark.png.png"
+                 DecodePixelWidth="128"
+                 CacheOption="OnLoad"/>
+</ResourceDictionary>

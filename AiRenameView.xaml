@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl x:Class="Explore.AiRenameView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DesignWidth="900" d:DesignHeight="600"
+             AllowDrop="True"
+             DragOver="OnDragOver"
+             Drop="OnDrop">
+
+	<Grid>
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="6"/>
+			<RowDefinition Height="*"/>
+			<RowDefinition Height="Auto"/>
+		</Grid.RowDefinitions>
+
+		<!-- 上部ツールバー（Main と同じ白ピルで統一） -->
+		<DockPanel Grid.Row="0" Margin="8,6,8,0">
+			<DockPanel.Resources>
+				<!-- ツールバー配下の Button は既定で白ピル -->
+				<Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}"/>
+			</DockPanel.Resources>
+
+			<!-- 左側：操作群 -->
+			<StackPanel Orientation="Horizontal">
+				<Button Click="OnAddFiles"  Content="ファイル追加…" Margin="0,0,0,0"/>
+				<Button Click="OnSuggest"   Content="候補作成"     Margin="8,0,0,0"/>
+				<Button Click="OnSelectAll" Content="すべて選択"   Margin="8,0,0,0"/>
+				<Button Click="OnClear"     Content="クリア"       Margin="8,0,0,0"/>
+				<Button Click="OnCheckAI"   Content="AI状態確認"   Margin="8,0,0,0"/>
+				<TextBlock Text="{Binding StatusText}"
+                           Margin="16,6,0,0" Foreground="Gray"
+                           VerticalAlignment="Center"/>
+			</StackPanel>
+		</DockPanel>
+
+		<Rectangle Grid.Row="1" Height="1" Fill="#33000000"/>
+
+		<!-- 一覧 -->
+		<DataGrid Grid.Row="2"
+                  ItemsSource="{Binding Items}"
+                  AutoGenerateColumns="False"
+                  CanUserAddRows="False"
+                  HeadersVisibility="Column"
+                  IsReadOnly="False"
+                  AlternatingRowBackground="#FFEFF6FF"
+                  AlternationCount="2">
+			<DataGrid.Columns>
+				<DataGridCheckBoxColumn Header="適用"
+                                        Binding="{Binding Apply, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                        Width="60"/>
+				<DataGridTextColumn Header="元の名前"
+                                    Binding="{Binding OriginalName}"
+                                    Width="2*"/>
+				<DataGridTextColumn Header="提案名（AI）"
+                                    Binding="{Binding SuggestedName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    Width="2*"/>
+				<DataGridTextColumn Header="適用先プレビュー"
+                                    Binding="{Binding PreviewFullPath}"
+                                    Width="3*"/>
+			</DataGrid.Columns>
+		</DataGrid>
+
+		<!-- 下部バー：左=ヘルプ, 右=選択を適用（※上のボタンと同じ見た目） -->
+		<Border Grid.Row="3" Padding="8,8,8,8">
+			<Grid>
+				<Grid.ColumnDefinitions>
+					<ColumnDefinition Width="*" />
+					<ColumnDefinition Width="Auto" />
+				</Grid.ColumnDefinitions>
+
+				<!-- ヘルプ（アイテムが無いときだけ表示） -->
+				<TextBlock Grid.Column="0"
+                           Text="※ ファイルをここにドラッグ＆ドロップできます"
+                           Margin="4,0,12,0" Foreground="#666" VerticalAlignment="Center">
+					<TextBlock.Style>
+						<Style TargetType="TextBlock">
+							<Setter Property="Visibility" Value="Collapsed"/>
+							<Style.Triggers>
+								<DataTrigger Binding="{Binding Items.Count}" Value="0">
+									<Setter Property="Visibility" Value="Visible"/>
+								</DataTrigger>
+							</Style.Triggers>
+						</Style>
+					</TextBlock.Style>
+				</TextBlock>
+
+				<!-- 右下：選択を適用（白ピルに統一） -->
+				<StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+					<Button Content="選択を適用"
+                            Style="{StaticResource ToolbarButton}"
+                            Click="OnApply"
+                            Margin="8,0,0,0"/>
+				</StackPanel>
+			</Grid>
+		</Border>
+	</Grid>
+</UserControl>
