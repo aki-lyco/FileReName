@@ -23,9 +23,14 @@
 								<!-- コードビハインドで UiSettings と同期 -->
 								<CheckBox x:Name="AutoIndexBox"
                                           Content="フォルダ選択時に自動インデックス" />
-								<CheckBox x:Name="IncludeSubsBox"
-                                          Content="サブフォルダを含める（インデックス時）"
-                                          Margin="0,8,0,0" />
+								<StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center">
+									<TextBlock Text="サブフォルダ深さ" VerticalAlignment="Center"/>
+									<TextBox x:Name="DepthBox" Width="64" Margin="8,0,8,0"
+											 HorizontalContentAlignment="Right"
+											 PreviewTextInput="OnDepthPreviewTextInput"/>
+									<TextBlock Text="（-1=無制限, 0=直下, 1=1階層…）"
+											   Foreground="#666" VerticalAlignment="Center"/>
+								</StackPanel>
 							</StackPanel>
 						</GroupBox>
 

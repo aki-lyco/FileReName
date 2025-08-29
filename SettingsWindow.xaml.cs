@@ -2,12 +2,21 @@
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
-using Explore.UI;             // UiSettings
-using Explore.Indexing;       // IndexDatabase
-using Microsoft.Data.Sqlite;  // SQLite
-using WpfMessageBox = System.Windows.MessageBox; // WPFのMessageBoxに明示エイリアス
+using System.Windows.Input;
+using Explore.UI;               // UiSettings
+using Explore.Indexing;         // IndexDatabase
+using Microsoft.Data.Sqlite;    // SQLite
+
+// 明示的に WPF 側の型を使うためのエイリアス
+using WpfMessageBox = System.Windows.MessageBox;
+using WpfCheckBox = System.Windows.Controls.CheckBox;
+using WpfTextBox = System.Windows.Controls.TextBox;
+using WpfRadioButton = System.Windows.Controls.RadioButton;
+using WpfTextBlock = System.Windows.Controls.TextBlock;
+using WpfPasswordBox = System.Windows.Controls.PasswordBox;
 
 namespace Explore
 {
@@ -27,8 +36,22 @@ namespace Explore
             // 既存の UI 設定（インデックス系）を反映
             try
             {
-                AutoIndexBox.IsChecked = UiSettings.Instance.AutoIndexOnSelect;
-                IncludeSubsBox.IsChecked = UiSettings.Instance.IncludeSubfolders;
+                // AutoIndex チェックボックス（これはXAML上そのまま）
+                var auto = this.FindName("AutoIndexBox") as WpfCheckBox;
+                if (auto != null) auto.IsChecked = UiSettings.Instance.AutoIndexOnSelect;
+
+                // ▼ サブフォルダ深さ：DepthBox（数値）があればそれを使う。無ければ旧IncludeSubsBoxに値を反映。
+                var depthBox = this.FindName("DepthBox") as WpfTextBox;
+                if (depthBox != null)
+                {
+                    depthBox.Text = UiSettings.Instance.IncludeDepth.ToString(CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    var includeSubs = this.FindName("IncludeSubsBox") as WpfCheckBox;
+                    if (includeSubs != null)
+                        includeSubs.IsChecked = (UiSettings.Instance.IncludeDepth != 0);
+                }
             }
             catch (Exception ex)
             {
@@ -66,15 +89,31 @@ namespace Explore
             try
             {
                 // 1) インデックス系
-                UiSettings.Instance.AutoIndexOnSelect = AutoIndexBox.IsChecked == true;
-                UiSettings.Instance.IncludeSubfolders = IncludeSubsBox.IsChecked == true;
+                var auto = this.FindName("AutoIndexBox") as WpfCheckBox;
+                UiSettings.Instance.AutoIndexOnSelect = (auto?.IsChecked == true);
+
+                // DepthBox（数値）があればそれを優先。無ければ IncludeSubsBox のON/OFFを -1 / 0 にマップ。
+                var depthBox = this.FindName("DepthBox") as WpfTextBox;
+                if (depthBox != null)
+                {
+                    if (!int.TryParse(depthBox.Text?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var depth))
+                        depth = -1; // 入力不正は無制限扱い
+                    UiSettings.Instance.IncludeDepth = depth;
+                }
+                else
+                {
+                    var includeSubs = this.FindName("IncludeSubsBox") as WpfCheckBox;
+                    UiSettings.Instance.IncludeDepth = (includeSubs?.IsChecked == true) ? -1 : 0;
+                }
+
                 UiSettings.Instance.Save();
                 UiSettings.Instance.RaiseChanged();
 
                 // 2) Gemini API キー保存
                 var key = GetApiKeyInput().Trim();
 
-                if (StoreEnvRadio.IsChecked == true)
+                var env = this.FindName("StoreEnvRadio") as WpfRadioButton;
+                if (env?.IsChecked == true)
                 {
                     SaveToEnvironment(key);
                 }
@@ -105,24 +144,40 @@ namespace Explore
             Close();
         }
 
-        // ====== API キー表示切替 ======
+        // ====== 数値入力のバリデーション（DepthBox用） ======
+        // XAML側で TextBox x:Name="DepthBox" に PreviewTextInput="OnDepthPreviewTextInput" を付けてください。
+        private void OnDepthPreviewTextInput(object sender, TextCompositionEventArgs e)
+        {
+            // 0-9 と '-' のみ許可（簡易）。詳細な整合性はOK時に int.TryParse で判定。
+            e.Handled = !Regex.IsMatch(e.Text ?? "", @"^[0-9\-]$");
+        }
+
+        // ====== 表示切替（APIキー） ======
         private void OnShowApiChecked(object? sender, RoutedEventArgs e)
         {
             try
             {
-                if (ShowApiSwitch.IsChecked == true)
+                var show = this.FindName("ShowApiSwitch") as WpfCheckBox;
+                var boxPwd = this.FindName("ApiKeyBox") as WpfPasswordBox;
+                var boxPlain = this.FindName("ApiKeyBoxPlain") as WpfTextBox;
+
+                if (show?.IsChecked == true)
                 {
-                    // Password -> Plain へ同期して表示
-                    ApiKeyBoxPlain.Text = ApiKeyBox.Password;
-                    ApiKeyBoxPlain.Visibility = Visibility.Visible;
-                    ApiKeyBox.Visibility = Visibility.Collapsed;
+                    if (boxPlain != null && boxPwd != null)
+                    {
+                        boxPlain.Text = boxPwd.Password;
+                        boxPlain.Visibility = Visibility.Visible;
+                        boxPwd.Visibility = Visibility.Collapsed;
+                    }
                 }
                 else
                 {
-                    // Plain -> Password へ同期して隠す
-                    ApiKeyBox.Password = ApiKeyBoxPlain.Text;
-                    ApiKeyBox.Visibility = Visibility.Visible;
-                    ApiKeyBoxPlain.Visibility = Visibility.Collapsed;
+                    if (boxPlain != null && boxPwd != null)
+                    {
+                        boxPwd.Password = boxPlain.Text;
+                        boxPwd.Visibility = Visibility.Visible;
+                        boxPlain.Visibility = Visibility.Collapsed;
+                    }
                 }
             }
             catch
@@ -149,48 +204,58 @@ namespace Explore
             string? envProc = Environment.GetEnvironmentVariable("GEMINI_API_KEY", EnvironmentVariableTarget.Process);
             string? envKey = !string.IsNullOrWhiteSpace(envUser) ? envUser : envProc;
 
+            var boxPwd = this.FindName("ApiKeyBox") as WpfPasswordBox;
+            var boxPlain = this.FindName("ApiKeyBoxPlain") as WpfTextBox;
+            var envRadio = this.FindName("StoreEnvRadio") as WpfRadioButton;
+            var fileRadio = this.FindName("StoreFileRadio") as WpfRadioButton;
+            var note = this.FindName("ApiSourceNote") as WpfTextBlock;
+
             // 優先順位：ファイル > 環境変数（ユーザー/プロセス）
             if (!string.IsNullOrEmpty(fileKey))
             {
-                SetApiKeyInput(fileKey);
-                StoreFileRadio.IsChecked = true;
-                StoreEnvRadio.IsChecked = false;
-                ApiSourceNote.Text = $"現在: ファイル（{ApiKeyFilePath}）から読み込みました。";
+                SetApiKeyInput(fileKey, boxPwd, boxPlain);
+                if (fileRadio != null) fileRadio.IsChecked = true;
+                if (envRadio != null) envRadio.IsChecked = false;
+                if (note != null) note.Text = $"現在: ファイル（{ApiKeyFilePath}）から読み込みました。";
             }
             else if (!string.IsNullOrEmpty(envKey))
             {
-                SetApiKeyInput(envKey);
-                StoreEnvRadio.IsChecked = true;
-                StoreFileRadio.IsChecked = false;
-                ApiSourceNote.Text = "現在: ユーザー環境変数 GEMINI_API_KEY から読み込みました。";
+                SetApiKeyInput(envKey, boxPwd, boxPlain);
+                if (envRadio != null) envRadio.IsChecked = true;
+                if (fileRadio != null) fileRadio.IsChecked = false;
+                if (note != null) note.Text = "現在: ユーザー環境変数 GEMINI_API_KEY から読み込みました。";
             }
             else
             {
-                SetApiKeyInput(string.Empty);
-                StoreEnvRadio.IsChecked = true; // 既定は環境変数
-                ApiSourceNote.Text = "現在: 保存されたキーは見つかりません。";
+                SetApiKeyInput(string.Empty, boxPwd, boxPlain);
+                if (envRadio != null) envRadio.IsChecked = true; // 既定は環境変数
+                if (note != null) note.Text = "現在: 保存されたキーは見つかりません。";
             }
         }
 
         private void SaveToEnvironment(string key)
         {
+            var note = this.FindName("ApiSourceNote") as WpfTextBlock;
+
             if (string.IsNullOrEmpty(key))
             {
                 // 削除（クリア）
                 Environment.SetEnvironmentVariable("GEMINI_API_KEY", null, EnvironmentVariableTarget.User);
                 Environment.SetEnvironmentVariable("GEMINI_API_KEY", null, EnvironmentVariableTarget.Process);
-                ApiSourceNote.Text = "環境変数 GEMINI_API_KEY を削除しました。";
+                if (note != null) note.Text = "環境変数 GEMINI_API_KEY を削除しました。";
                 return;
             }
 
             // ユーザー環境変数 + カレントプロセスに反映
             Environment.SetEnvironmentVariable("GEMINI_API_KEY", key, EnvironmentVariableTarget.User);
             Environment.SetEnvironmentVariable("GEMINI_API_KEY", key, EnvironmentVariableTarget.Process);
-            ApiSourceNote.Text = "環境変数 GEMINI_API_KEY に保存しました（このアプリでは直ちに有効）。";
+            if (note != null) note.Text = "環境変数 GEMINI_API_KEY に保存しました（このアプリでは直ちに有効）。";
         }
 
         private void SaveToFile(string key)
         {
+            var note = this.FindName("ApiSourceNote") as WpfTextBlock;
+
             // %APPDATA%\Explore\gemini_api_key.txt に保存（空なら削除）
             Directory.CreateDirectory(_appDataDir);
 
@@ -198,7 +263,7 @@ namespace Explore
             {
                 if (File.Exists(ApiKeyFilePath))
                     File.Delete(ApiKeyFilePath);
-                ApiSourceNote.Text = $"ファイル（{ApiKeyFilePath}）を削除しました。";
+                if (note != null) note.Text = $"ファイル（{ApiKeyFilePath}）を削除しました。";
                 return;
             }
 
@@ -213,18 +278,22 @@ namespace Explore
 
             // 現プロセスにも反映してすぐ使えるようにする
             Environment.SetEnvironmentVariable("GEMINI_API_KEY", key, EnvironmentVariableTarget.Process);
-            ApiSourceNote.Text = $"ファイル（{ApiKeyFilePath}）に保存しました（このアプリでは直ちに有効）。";
+            if (note != null) note.Text = $"ファイル（{ApiKeyFilePath}）に保存しました（このアプリでは直ちに有効）。";
         }
 
         private string GetApiKeyInput()
         {
-            return (ShowApiSwitch.IsChecked == true) ? ApiKeyBoxPlain.Text : ApiKeyBox.Password;
+            var show = this.FindName("ShowApiSwitch") as WpfCheckBox;
+            var boxPwd = this.FindName("ApiKeyBox") as WpfPasswordBox;
+            var boxPlain = this.FindName("ApiKeyBoxPlain") as WpfTextBox;
+            if (show?.IsChecked == true) return boxPlain?.Text ?? "";
+            return boxPwd?.Password ?? "";
         }
 
-        private void SetApiKeyInput(string value)
+        private void SetApiKeyInput(string value, WpfPasswordBox? pwd, WpfTextBox? plain)
         {
-            ApiKeyBox.Password = value ?? string.Empty;
-            ApiKeyBoxPlain.Text = value ?? string.Empty;
+            if (pwd != null) pwd.Password = value ?? string.Empty;
+            if (plain != null) plain.Text = value ?? string.Empty;
         }
 
         // ====== DB件数の再読込 ======

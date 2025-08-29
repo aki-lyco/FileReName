@@ -141,7 +141,6 @@ namespace Explore
         private static readonly FreshnessService _fresh = new(_db);
 
         private CancellationTokenSource? _indexCts;
-        private CancellationTokenSource? _freshCts;
 
         private bool _isIndexing;
         public bool IsIndexing { get => _isIndexing; private set { _isIndexing = value; Raise(); } }
@@ -233,11 +232,11 @@ namespace Explore
 
                 DataContext = this;
 
-                Rows.CollectionChanged += async (_, e) =>
+                Rows.CollectionChanged += (_, e) =>
                 {
                     if (e?.NewItems == null) return;
                     foreach (var item in e.NewItems)
-                        if (item is FileRow r) _ = UpdateFreshnessForRowAsync(r);
+                        if (item is FileRow r) _ = UpdateFreshnessForRowAsync(r); // fire-and-forget
                 };
 
                 // DBは先に
@@ -483,8 +482,8 @@ namespace Explore
 
                 await _db.EnsureCreatedAsync();
 
-                var recursive = UiSettings.Instance?.IncludeSubfolders == true;
-                var records = EnumerateRecordsAsync(path, recursive, _indexCts.Token);
+                var depth = UiSettings.Instance?.IncludeDepth ?? -1;
+                var records = EnumerateRecordsByDepthAsync(path, depth, _indexCts.Token);
 
                 await _db.BulkUpsertAsync(
                     records,
@@ -683,7 +682,8 @@ namespace Explore
                 var prog = new Progress<(long scanned, long inserted)>(p =>
                     IndexStatusText = $"登録中 {p.scanned:N0} 件（新規 {p.inserted:N0}）");
 
-                var records = EnumerateRecordsAsync(root!, recursive: false, _indexCts.Token);
+                var depth = UiSettings.Instance?.IncludeDepth ?? -1;
+                var records = EnumerateRecordsByDepthAsync(root!, depth, _indexCts.Token);
                 var result = await _db.BulkUpsertAsync(records, batchSize: 500, progress: prog, ct: _indexCts.Token);
 
                 IndexedCountText = $"DB件数: {await GetTableCountAsync("files"):N0}";
@@ -1383,6 +1383,63 @@ namespace Explore
                 if ((uint)Environment.TickCount % 2048 == 0) await Task.Yield();
             }
         }
+
+        private async IAsyncEnumerable<DbFileRecord> EnumerateRecordsByDepthAsync(
+             string root, int depth,
+             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            // 無制限は既存の再帰ONで流用
+            if (depth < 0)
+            {
+                await foreach (var r in EnumerateRecordsAsync(root, recursive: true, ct))
+                    yield return r;
+                yield break;
+            }
+
+            var dirOpts = new EnumerationOptions
+            {
+                RecurseSubdirectories = false,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.Hidden | FileAttributes.System
+            };
+
+            var stack = new Stack<(string dir, int rest)>();
+            stack.Push((root, depth));
+
+            while (stack.Count > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                var (dir, rest) = stack.Pop();
+
+                // 現在階層のファイル
+                IEnumerable<string> files;
+                try { files = Directory.EnumerateFiles(dir, "*", dirOpts); }
+                catch { files = Array.Empty<string>(); }
+
+                foreach (var f in files)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    DbFileRecord? rec = null;
+                    try { rec = BuildRecordFromFs(f); } catch { }
+                    if (rec != null) yield return rec;
+                }
+
+                // 次の階層へ
+                if (rest > 0)
+                {
+                    IEnumerable<string> subs;
+                    try { subs = Directory.EnumerateDirectories(dir, "*", dirOpts); }
+                    catch { subs = Array.Empty<string>(); }
+
+                    foreach (var sub in subs)
+                        stack.Push((sub, rest - 1));
+                }
+
+                if ((uint)Environment.TickCount % 2048 == 0)
+                    await Task.Yield();
+            }
+        }
+
 
         private async Task<long> GetTableCountAsync(string table)
         {
