@@ -40,7 +40,7 @@ namespace Explore.FileSystem
         public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    // ====== ファイル行 ======
+    // ====== ファイル/フォルダー 行 ======
     public sealed class FileItem : NotifyBase
     {
         public string Name { get; }
@@ -48,6 +48,7 @@ namespace Explore.FileSystem
         public string Extension { get; }
         public long Size { get; }
         public DateTime LastWriteTime { get; }
+        public bool IsDirectory { get; }
 
         public FileItem(FileInfo fi)
         {
@@ -56,16 +57,29 @@ namespace Explore.FileSystem
             Extension = fi.Extension;
             Size = fi.Exists ? fi.Length : 0;
             LastWriteTime = fi.Exists ? fi.LastWriteTime : DateTime.MinValue;
+            IsDirectory = false;
         }
 
-        // ★追加: Win32 列挙から直接生成するための軽量コンストラクタ
-        public FileItem(string fullPath, string name, string? extension, long size, DateTime lastWriteTime)
+        // フォルダー用
+        public FileItem(DirectoryInfo di)
+        {
+            Name = di.Name;
+            FullPath = di.FullName;
+            Extension = string.Empty;
+            Size = 0;
+            LastWriteTime = di.Exists ? di.LastWriteTime : DateTime.MinValue;
+            IsDirectory = true;
+        }
+
+        // Win32 直列挙用
+        public FileItem(string fullPath, string name, string? extension, long size, DateTime lastWriteTime, bool isDirectory)
         {
             FullPath = fullPath;
             Name = name;
             Extension = extension ?? System.IO.Path.GetExtension(name);
             Size = size;
             LastWriteTime = lastWriteTime;
+            IsDirectory = isDirectory;
         }
     }
 
@@ -173,7 +187,7 @@ namespace Explore.FileSystem
             }, ct);
         }
 
-        #region Win32 fast enumeration
+        #region Win32 fast enumeration (files only)
         private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
         private const int FIND_FIRST_EX_LARGE_FETCH = 0x00000002;
 
@@ -244,7 +258,7 @@ namespace Explore.FileSystem
                     var full = System.IO.Path.Combine(path, name);
                     var ext = System.IO.Path.GetExtension(name);
 
-                    list.Add(new FileItem(full, name, ext, size, lastWrite));
+                    list.Add(new FileItem(full, name, ext, size, lastWrite, isDirectory: false));
                 }
                 while (FindNextFile(h, out data));
             }
@@ -307,19 +321,86 @@ namespace Explore.FileSystem
             await _gate.WaitAsync();
             try
             {
+                // 前回の列挙を止める
                 _cts?.Cancel();
-                _cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                _cts = new CancellationTokenSource();
                 var ct = _cts.Token;
 
                 CurrentPath = path;
-                var items = await _fs.GetFilesAsync(path, ct);
-
                 Files.Clear();
-                foreach (var it in items) Files.Add(it);
-
                 (RefreshCommand as RelayCommand)?.RaiseCanExecuteChanged();
+
+                // BGでストリーミング列挙開始（戻りは即）
+                _ = Task.Run(async () =>
+                {
+                    const int FirstBurst = 100;
+                    const int NextBatch = 100;
+
+                    var opts = new EnumerationOptions
+                    {
+                        RecurseSubdirectories = false,
+                        IgnoreInaccessible = true,
+                        AttributesToSkip = FileAttributes.Hidden | FileAttributes.System
+                    };
+
+                    var buffer = new List<FileItem>(NextBatch);
+                    int pushed = 0;
+
+                    void FlushToUi()
+                    {
+                        if (buffer.Count == 0) return;
+                        var copy = buffer.ToArray();
+                        buffer.Clear();
+                        // WPFのUIスレッドでObservableCollectionに加える
+                        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            foreach (var it in copy) Files.Add(it);
+                        }, System.Windows.Threading.DispatcherPriority.Background);
+                    }
+
+                    try
+                    {
+                        // 2) ファイル
+                        foreach (var filePath in Directory.EnumerateFiles(path, "*", opts))
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            FileItem it;
+                            try
+                            {
+                                var fi = new FileInfo(filePath);
+                                it = new FileItem(fi);
+                            }
+                            catch { continue; }
+
+                            buffer.Add(it);
+                            pushed++;
+
+                            if (pushed <= FirstBurst)
+                            {
+                                FlushToUi();
+                                continue;
+                            }
+
+                            if (buffer.Count >= NextBatch)
+                            {
+                                FlushToUi();
+                                await Task.Yield(); // UIに描画時間を譲る
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException) { /* フォルダ切替など */ }
+                    catch { /* 個別例外は握りつぶし */ }
+                    finally
+                    {
+                        // 端数flush
+                        FlushToUi();
+                    }
+                }, ct);
             }
-            finally { _gate.Release(); }
+            finally
+            {
+                _gate.Release();
+            }
         }
 
         public async Task RefreshAsync()

@@ -10,6 +10,8 @@
 
 		<!-- アプリのアイコン（Assets に配置した .ico を指定） -->
 		<ApplicationIcon>Assets\penguin_appicon_win.ico</ApplicationIcon>
+		<AssemblyTitle>FileSherpa AI</AssemblyTitle>
+		<Product>FileSherpa AI</Product>
 	</PropertyGroup>
 
 	<ItemGroup>

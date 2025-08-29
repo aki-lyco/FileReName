@@ -1,4 +1,4 @@
-﻿// Explore/FilesControl.xaml.cs
+﻿﻿// Explore/FilesControl.xaml.cs
 using System;
 using System.IO;
 using System.Text.Json;
@@ -499,92 +499,109 @@ namespace Explore
                 SessionExplorerState.ExpandedPaths.Remove(node.FullPath);
         }
 
+        private NotifyCollectionChangedEventHandler? _vmFilesHandler;
+
         // 大量ファイルの漸進追加用
         private CancellationTokenSource? _loadCts;
-        private const int WarmShowCount = 100;  // 先頭に即出す件数（好みで 100～500）
-        private const int BatchSize = 100;  // 追加時のバッチ件数
+        private const int WarmShowCount = 200;  // 先頭に即出す件数（好みで 100～500）
+        private const int BatchSize     = 100;  // 追加時のバッチ件数
 
         private async Task NavigateAndFillAsync(string? path)
         {
             if (string.IsNullOrWhiteSpace(path)) return;
 
-            // 前回の追加をキャンセル
+            // 既存ロードを停止
             _loadCts?.Cancel();
             _loadCts = new CancellationTokenSource();
             var ct = _loadCts.Token;
 
-            await _vm.NavigateToAsync(path);
+            // 既存の購読を解除
+            if (_vmFilesHandler != null)
+                _vm.Files.CollectionChanged -= _vmFilesHandler;
 
             Rows.Clear();
+            UpdatePinStar();
 
-            // ★ FileEntry → FileItem に修正（両辺の型を合わせる）
-            var files = _vm.Files?.ToList() ?? new List<FileItem>();
+            // まず購読をセットしてからVMにナビゲート（VMは即戻る）
+            int shown = 0;
+            var pending = new List<FileRow>(BatchSize);
 
-            // 先頭だけ即時に見せる
-            int warm = Math.Min(WarmShowCount, files.Count);
-            for (int i = 0; i < warm; i++)
+            void FlushPending()
             {
-                var f = files[i];
-                Rows.Add(new FileRow
+                if (pending.Count == 0) return;
+                var chunk = pending.ToArray();
+                pending.Clear();
+                Dispatcher.Invoke(() =>
                 {
-                    FullPath = f.FullPath,
-                    Name = f.Name,
-                    Extension = f.Extension,
-                    Size = f.Size,
-                    LastWriteTime = f.LastWriteTime
+                    foreach (var r in chunk) Rows.Add(r);
                 });
             }
 
-            UpdatePinStar();
-
-            // 先頭分だけ鮮度を先に出す（体感重視）
-            _fresh.InvalidateFreshnessCache(path);
-            _ = RefreshRowsFreshnessAsync(path);   // 先頭分がまず更新される
-
-            // 残りはバックグラウンドで段階追加
-            _ = Task.Run(async () =>
+            _vmFilesHandler = (s, e) =>
             {
-                try
-                {
-                    int index = warm;
-                    while (index < files.Count)
-                    {
-                        ct.ThrowIfCancellationRequested();
+                if (ct.IsCancellationRequested) return;
 
-                        var chunk = files.Skip(index).Take(BatchSize).Select(f => new FileRow
+                if (e.Action == NotifyCollectionChangedAction.Reset)
+                {
+                    // 念のため
+                    Dispatcher.Invoke(() => Rows.Clear());
+                    shown = 0;
+                    pending.Clear();
+                    return;
+                }
+
+                if (e.NewItems != null)
+                {
+                    foreach (var o in e.NewItems)
+                    {
+                        if (o is not Explore.FileSystem.FileItem f) continue;
+                        if (f.IsDirectory) continue;   // ★ フォルダは右一覧に出さない
+
+                        var row = new FileRow
                         {
                             FullPath = f.FullPath,
                             Name = f.Name,
                             Extension = f.Extension,
                             Size = f.Size,
                             LastWriteTime = f.LastWriteTime
-                        }).ToList();
+                        };
 
-                        // UI スレッドでまとめて追加
-                        await Dispatcher.InvokeAsync(() =>
+                        if (shown < WarmShowCount)
                         {
-                            foreach (var r in chunk) Rows.Add(r);
-                        });
-
-                        index += chunk.Count;
-
-                        // 追加した分の鮮度も少しずつ反映（重くならないように）
-                        _ = Dispatcher.InvokeAsync(async () =>
+                            // 先頭100件は即時に見せる
+                            Dispatcher.Invoke(() => Rows.Add(row));
+                            shown++;
+                        }
+                        else
                         {
-                            try { await RefreshRowsFreshnessAsync(path); } catch { }
-                        });
-
-                        // UI をブロックしないよう小休止
-                        await Task.Delay(1, ct);
+                            // 以降は100件ずつ
+                            pending.Add(row);
+                            if (pending.Count >= BatchSize) FlushPending();
+                        }
                     }
-
-                    // すべて追加し終えたら最終的な鮮度％を更新
-                    await Dispatcher.InvokeAsync(() => _ = RecalcFreshnessPercentAsync(path));
                 }
-                catch (OperationCanceledException) { /* 別フォルダへ移動など */ }
-                catch { /* 失敗は握りつぶす（UI保護） */ }
+            };
+
+            _vm.Files.CollectionChanged += _vmFilesHandler;
+
+            // VMにナビゲート（BGで列挙が走り出す）
+            await _vm.NavigateToAsync(path);
+
+            // 鮮度計算：先に無効化→徐々に埋める
+            _fresh.InvalidateFreshnessCache(path);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    // 最初の描画が落ち着いた頃に開始
+                    await Task.Delay(50, ct);
+                    await RefreshRowsFreshnessAsync(path);
+                    await RecalcFreshnessPercentAsync(path);
+                }
+                catch { }
             }, ct);
         }
+
 
         // Index 操作
         private async void OnIndexCurrentFolderClick(object? sender, RoutedEventArgs e)

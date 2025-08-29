@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Explore"
         mc:Ignorable="d"
-        Title="MainWindow" Height="760" Width="1280">
+        Title="FileSherpa AI" Height="760" Width="1280">
 
 	<!-- Ctrl+I で AI 状態確認 -->
 	<Window.InputBindings>
