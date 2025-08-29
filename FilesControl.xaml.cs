@@ -233,6 +233,13 @@ namespace Explore
 
                 DataContext = this;
 
+                Rows.CollectionChanged += async (_, e) =>
+                {
+                    if (e?.NewItems == null) return;
+                    foreach (var item in e.NewItems)
+                        if (item is FileRow r) _ = UpdateFreshnessForRowAsync(r);
+                };
+
                 // DBは先に
                 await _db.EnsureCreatedAsync();
 
@@ -1387,6 +1394,16 @@ namespace Explore
         }
 
         private readonly System.Threading.SemaphoreSlim _freshSem = new(1, 1);
+
+        private async Task UpdateFreshnessForRowAsync(FileRow row)
+        {
+            try
+            {
+                var st = await _fresh.GetFreshStateByPathAsync(row.FullPath, CancellationToken.None);
+                row.FreshState = st;
+            }
+            catch { /* 個別失敗は無視 */ }
+        }
 
         private async Task RefreshRowsFreshnessAsync(string scopePath)
         {
